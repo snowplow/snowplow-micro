@@ -49,7 +49,8 @@ final class MemorySink(igluClient: IgluCirceClient[IO],
                        destination: Option[Uri],
                        processor: Processor,
                        enrichConfig: EnrichConfig,
-                       httpClient: Client[IO]) extends Sink[IO] {
+                       httpClient: Client[IO],
+                       private[micro] val validationCache: ValidationCache) extends Sink[IO] {
   override val maxBytes = Int.MaxValue
   private lazy val logger = LoggerFactory.getLogger("EventLog")
 
@@ -108,19 +109,19 @@ final class MemorySink(igluClient: IgluCirceClient[IO],
             }
             partitionEvents.flatMap {
               case (goodEvents, badEvents) =>
-                ValidationCache.addToGood(goodEvents)
-                ValidationCache.addToBad(badEvents)
+                validationCache.addToGood(goodEvents)
+                validationCache.addToBad(badEvents)
                 sendOutput(goodEvents)
             }
           case Validated.Invalid(badRow) =>
             val bad = BadEvent(Some(collectorPayload), None, List("Error while extracting event(s) from collector payload and validating it/them.", badRow.compact))
             logger.warn(s"BAD ${bad.errors.head}")
-            IO(ValidationCache.addToBad(List(bad)))
+            IO(validationCache.addToBad(List(bad)))
         }
       case Validated.Invalid(badRows) =>
         val bad = BadEvent(None, None, List("Can't deserialize Thrift bytes.") ++ badRows.toList.map(_.compact))
         logger.warn(s"BAD ${bad.errors.head}")
-        IO(ValidationCache.addToBad(List(bad)))
+        IO(validationCache.addToBad(List(bad)))
     }
 
   /** Validate the raw event using Common Enrich logic, and extract the event type if any,

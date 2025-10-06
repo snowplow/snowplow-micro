@@ -60,7 +60,8 @@ object Run {
       badProcessor = Processor(BuildInfo.name, BuildInfo.version)
       lookup = JavaNetRegistryLookup.ioLookupInstance[IO]
       queue <- Resource.eval(Queue.unbounded[IO, CollectorPayload])
-      sink = new MemorySink(config.iglu.client, lookup, enrichmentRegistry, config.outputFormat, config.destination, badProcessor, config.enrichConfig, httpClient)
+      validationCache = new ValidationCache(config.maxEvents)
+      sink = new MemorySink(config.iglu.client, lookup, enrichmentRegistry, config.outputFormat, config.destination, badProcessor, config.enrichConfig, httpClient, validationCache)
       sinks = Sinks(sink, sink)
       _ <- Sinks
         .dequeue(config.collector, BuildInfo, queue, sinks)
@@ -80,8 +81,9 @@ object Run {
         IO.pure(true)
       )
 
-      miniRoutes = new Routing(config.iglu.resolver)(lookup).value
-      allRoutes = miniRoutes <+> collectorRoutes.value <+> collectorRoutes.health
+      microRouting = new Routing(config.iglu.resolver, validationCache)(lookup)
+      microRoutes = if (config.maxEvents.contains(0)) microRouting.disabled else microRouting.enabled
+      allRoutes = microRoutes <+> collectorRoutes.value <+> collectorRoutes.health
       _ <- MicroHttpServer.build(allRoutes, config, sslContext)
     } yield ()
   }

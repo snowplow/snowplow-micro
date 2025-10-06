@@ -15,12 +15,12 @@ package com.snowplowanalytics.snowplow.micro
   * so that they can be quickly filtered.
   * Bad events are stored with the error message(s) describing what when wrong.
   */
-private[micro] trait ValidationCache {
+private[micro] class ValidationCache(maxEvents: Option[Int]) {
   import ValidationCache._
 
-  protected var good: List[GoodEvent]
+  protected var good = List.empty[GoodEvent]
   private object LockGood
-  protected var bad: List[BadEvent]
+  protected var bad = List.empty[BadEvent]
   private object LockBad
 
   /** Compute a summary with the number of good and bad events currently in cache. */
@@ -37,13 +37,19 @@ private[micro] trait ValidationCache {
   /** Add a good event to the cache. */
   private[micro] def addToGood(events: List[GoodEvent]): Unit =
     LockGood.synchronized {
-      good = events ++ good
+      good = maxEvents match {
+        case Some(l) => (events ++ good).take(l)
+        case None => events ++ good
+      }
     }
 
   /** Add a bad event to the cache. */
   private[micro] def addToBad(events: List[BadEvent]): Unit =
     LockBad.synchronized {
-      bad = events ++ bad
+      bad = maxEvents match {
+        case Some(l) => (events ++ bad).take(l)
+        case None => events ++ bad
+      }
     }
 
   /** Remove all the events from memory. */
@@ -77,13 +83,9 @@ private[micro] trait ValidationCache {
       val filtered = bad.filter(keepBadEvent(_, filtersBad))
       filtered.take(filtersBad.limit.getOrElse(filtered.size))
     }
-
 }
 
-private[micro] object ValidationCache extends ValidationCache {
-  protected var good = List.empty[GoodEvent]
-  protected var bad = List.empty[BadEvent]
-
+private[micro] object ValidationCache {
   /** Check if a good event matches the filters. */
   private[micro] def keepGoodEvent(event: GoodEvent, filters: FiltersGood): Boolean =
     filters.event_type.toSet.subsetOf(event.eventType.toSet) &&

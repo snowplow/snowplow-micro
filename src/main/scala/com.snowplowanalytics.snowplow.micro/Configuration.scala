@@ -51,13 +51,14 @@ object Configuration {
       Uri.fromString(str).leftMap(_ => s"Invalid URI: $str").toValidatedNel
     }
 
-    final case class Config(collector: Option[Path], iglu: Option[Path], outputFormat: OutputFormat, destination: Option[Uri])
+    final case class Config(collector: Option[Path], iglu: Option[Path], outputFormat: OutputFormat, destination: Option[Uri], maxEvents: Option[Int])
 
     private val collector = Opts.option[Path]("collector-config", "Path to HOCON configuration (optional)", "c", "config.hocon").orNone
     private val iglu = Opts.option[Path]("iglu", "Configuration file for Iglu Client (optional)", "i", "iglu.json").orNone
     private val outputTsv = Opts.flag("output-tsv", "Output events in TSV format to standard output or HTTP destination", "t").orFalse
     private val outputJson = Opts.flag("output-json", "Output events in JSON format to standard output or HTTP destination (with a separate key for each schema)", "j").orFalse
     private val destination = Opts.option[Uri]("destination", "HTTP(s) URL to send output data to (requires --output-json or --output-tsv)", "d").orNone
+    private val maxEvents = Opts.option[Int]("max-events", "Maximum number of events of each kind (good, bad) to keep in memory (setting this to 0 disables all /micro endpoints)", "m").orNone
 
     private val output = (outputTsv, outputJson, destination)
       .mapN { (_, _, _) }
@@ -69,8 +70,8 @@ object Configuration {
         case (true, true, _) => "Cannot specify both --output-tsv and --output-json".invalidNel[(OutputFormat, Option[Uri])]
       }
 
-    val config: Opts[Config] = (collector, iglu, output).mapN {
-      case (c, i, (f, d)) => Config(c, i, f, d)
+    val config: Opts[Config] = (collector, iglu, output, maxEvents).mapN {
+      case (c, i, (f, d), m) => Config(c, i, f, d, m)
     }
   }
 
@@ -91,7 +92,8 @@ object Configuration {
                                enrichmentsConfig: List[EnrichmentConf],
                                enrichConfig: EnrichConfig,
                                outputFormat: OutputFormat,
-                               destination: Option[Uri])
+                               destination: Option[Uri],
+                               maxEvents: Option[Int])
 
   final case class EnrichValidation(atomicFieldsLimits: AtomicFields)
   final case class EnrichConfig(
@@ -111,7 +113,7 @@ object Configuration {
         enrichConfig <- loadEnrichConfig()
         igluResources <- loadIgluResources(cliConfig.iglu, enrichConfig.maxJsonDepth)
         enrichmentsConfig <- loadEnrichmentConfig(igluResources.client)
-      } yield MicroConfig(collectorConfig, igluResources, enrichmentsConfig, enrichConfig, cliConfig.outputFormat, cliConfig.destination)
+      } yield MicroConfig(collectorConfig, igluResources, enrichmentsConfig, enrichConfig, cliConfig.outputFormat, cliConfig.destination, cliConfig.maxEvents)
     }
   }
 
