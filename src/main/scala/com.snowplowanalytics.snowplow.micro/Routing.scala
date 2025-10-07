@@ -29,30 +29,34 @@ import org.http4s.dsl.Http4sDsl
 import org.http4s.{HttpRoutes, Response, StaticFile}
 import org.joda.time.DateTime
 
-final class Routing(igluResolver: Resolver[IO])
+final class Routing(igluResolver: Resolver[IO], validationCache: ValidationCache)
                    (implicit lookup: RegistryLookup[IO]) extends Http4sDsl[IO] {
 
-  val value: HttpRoutes[IO] = HttpRoutes.of[IO] {
+  val disabled: HttpRoutes[IO] = HttpRoutes.of[IO] {
+    case _ -> "micro" /: _ => NotFound()
+  }
+
+  val enabled: HttpRoutes[IO] = HttpRoutes.of[IO] {
     case request@method -> "micro" /: path =>
       (method, path.segments.headOption.map(_.encoded)) match {
         case (GET, Some("events")) =>
-          Ok(ValidationCache.getGoodAndIncomplete.map(_.event.toJson(lossy = true)))
+          Ok(validationCache.getGoodAndIncomplete.map(_.event.toJson(lossy = true)))
         case (POST | GET, Some("all")) =>
-          Ok(ValidationCache.getSummary())
+          Ok(validationCache.getSummary())
         case (POST | GET, Some("reset")) =>
-          ValidationCache.reset()
-          Ok(ValidationCache.getSummary())
+          validationCache.reset()
+          Ok(validationCache.getSummary())
         case (GET, Some("good")) =>
-          Ok(ValidationCache.filterGood(FiltersGood(None, None, None, None)))
+          Ok(validationCache.filterGood(FiltersGood(None, None, None, None)))
         case (POST, Some("good")) =>
           request.as[FiltersGood].flatMap { filters =>
-            Ok(ValidationCache.filterGood(filters).asJson)
+            Ok(validationCache.filterGood(filters).asJson)
           }
         case (GET, Some("bad")) =>
-          Ok(ValidationCache.filterBad(FiltersBad(None, None, None)))
+          Ok(validationCache.filterBad(FiltersBad(None, None, None)))
         case (POST, Some("bad")) =>
           request.as[FiltersBad].flatMap { filters =>
-            Ok(ValidationCache.filterBad(filters))
+            Ok(validationCache.filterBad(filters))
           }
         case (GET, Some("iglu")) =>
           path match {
@@ -96,7 +100,6 @@ final class Routing(igluResolver: Resolver[IO])
 }
 
 object Routing {
-
   implicit val dateTimeEncoder: Encoder[DateTime] =
     Encoder[String].contramap(_.toString)
 

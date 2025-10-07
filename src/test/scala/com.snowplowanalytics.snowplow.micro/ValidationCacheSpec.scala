@@ -22,8 +22,6 @@ import java.time.Instant
 class ValidationCacheSpec extends Specification {
   import ValidationCacheSpec._
 
-
-
   "getSummary" >> {
     "should return the correct number of bad and good events" >> {
       "for an empty cache" >> {
@@ -38,7 +36,7 @@ class ValidationCacheSpec extends Specification {
         val cache = cacheOf(
           List(GoodEvent1, GoodEvent2),
           List(BadEvent1)
-          )
+        )
 
         cache.getSummary().good must_== 2
         cache.getSummary().bad must_== 1
@@ -77,6 +75,39 @@ class ValidationCacheSpec extends Specification {
       cache.getSummary().bad must_== 0
       cache.filterGood() must contain(exactly(GoodEvent1, GoodEvent2))
     }
+
+    "should respect the limit when adding events" >> {
+      val cache = new ValidationCache(Some(1))
+      cache.addToGood(List(GoodEvent1, GoodEvent2))
+
+      cache.getSummary().good must_== 1
+      cache.filterGood() must contain(exactly(GoodEvent1))
+    }
+
+    "should implement rolling behavior when limit is exceeded" >> {
+      val cache = new ValidationCache(Some(1))
+      cache.addToGood(List(GoodEvent1))
+      cache.addToGood(List(GoodEvent2))
+
+      cache.getSummary().good must_== 1
+      cache.filterGood() must contain(exactly(GoodEvent2))
+    }
+
+    "should maintain FIFO order with rolling cache" >> {
+      val cache = new ValidationCache(Some(2))
+      cache.addToGood(List(GoodEvent1))
+      cache.addToGood(List(GoodEvent2))
+
+      cache.getSummary().good must_== 2
+      cache.filterGood() must contain(exactly(GoodEvent1, GoodEvent2))
+
+      // Add third event, should drop the first (GoodEvent1)
+      val GoodEvent3 = GoodEvent1.copy(eventType = Some("type3"))
+      cache.addToGood(List(GoodEvent3))
+
+      cache.getSummary().good must_== 2
+      cache.filterGood() must contain(exactly(GoodEvent2, GoodEvent3))
+    }
   }
 
   "addToBad" >> {
@@ -105,6 +136,23 @@ class ValidationCacheSpec extends Specification {
       cache.getSummary().good must_== 0
       cache.getSummary().bad must_== 2
       cache.filterBad() must contain(exactly(BadEvent1, BadEvent2))
+    }
+
+    "should respect the limit when adding bad events" >> {
+      val cache = new ValidationCache(Some(1))
+      cache.addToBad(List(BadEvent1, BadEvent2))
+
+      cache.getSummary().bad must_== 1
+      cache.filterBad() must contain(exactly(BadEvent1))
+    }
+
+    "should implement rolling behavior for bad events when limit is exceeded" >> {
+      val cache = new ValidationCache(Some(1))
+      cache.addToBad(List(BadEvent1))
+      cache.addToBad(List(BadEvent2))
+
+      cache.getSummary().bad must_== 1
+      cache.filterBad() must contain(exactly(BadEvent2))
     }
   }
 
@@ -303,11 +351,12 @@ object ValidationCacheSpec {
 
   val testTimestamp = DateTime.parse("2014-01-16T00:49:58.278+00:00")
 
-  def cacheOf(goodInit: List[GoodEvent], badInit: List[BadEvent]): ValidationCache =
-    new ValidationCache {
-      var good = goodInit
-      var bad = badInit
-    }
+  def cacheOf(goodInit: List[GoodEvent], badInit: List[BadEvent]): ValidationCache = {
+    val cache = new ValidationCache(None)
+    cache.addToGood(goodInit)
+    cache.addToBad(badInit)
+    cache
+  }
 
   def emptyCache(): ValidationCache =
     cacheOf(Nil, Nil)

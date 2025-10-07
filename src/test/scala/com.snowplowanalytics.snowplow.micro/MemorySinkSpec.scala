@@ -38,29 +38,29 @@ class MemorySinkSpec extends CatsResource[IO, MemorySink] with SpecificationLike
 
   "processThriftBytes" >> {
     "should add a BadEvent to the cache if the array of bytes is not a valid Thrift payload" >> withResource { sink =>
-      ValidationCache.reset()
+      sink.validationCache.reset()
       val bytes = Array(1, 3, 5, 7).map(_.toByte)
       sink.processThriftBytes(bytes).map { _ =>
-        ValidationCache.filterBad() must beLike { case List(badEvent) if badEvent.errors.exists(_.contains("Can't deserialize Thrift bytes")) => ok }
-        ValidationCache.filterGood().size must beEqualTo(0)
+        sink.validationCache.filterBad() must beLike { case List(badEvent) if badEvent.errors.exists(_.contains("Can't deserialize Thrift bytes")) => ok }
+        sink.validationCache.filterGood().size must beEqualTo(0)
       }
     }
 
     "should add a BadEvent to the cache if RawEvent(s) can't be extracted from the CollectorPayload" >> withResource { sink =>
-      ValidationCache.reset()
+      sink.validationCache.reset()
       val bytes = buildThriftBytesBadCollectorPayload()
       sink.processThriftBytes(bytes).map { _ =>
-        ValidationCache.filterBad() must beLike { case List(badEvent) if badEvent.errors.exists(_.contains("Error while extracting event(s) from collector payload")) => ok }
-        ValidationCache.filterGood().size must beEqualTo(0)
+        sink.validationCache.filterBad() must beLike { case List(badEvent) if badEvent.errors.exists(_.contains("Error while extracting event(s) from collector payload")) => ok }
+        sink.validationCache.filterGood().size must beEqualTo(0)
       }
     }
 
     "should add a GoodEvent and a BadEvent to the cache for a CollectorPayload containing both" >> withResource { sink =>
-      ValidationCache.reset()
+      sink.validationCache.reset()
       val bytes = buildThriftBytes1Good1Bad()
       sink.processThriftBytes(bytes).map { _ =>
-        ValidationCache.filterBad() must beLike { case List(badEvent) if badEvent.errors.exists(_.contains("Error while validating the event")) => ok }
-        ValidationCache.filterGood().size must beEqualTo(1)
+        sink.validationCache.filterBad() must beLike { case List(badEvent) if badEvent.errors.exists(_.contains("Error while validating the event")) => ok }
+        sink.validationCache.filterGood().size must beEqualTo(1)
       }
     }
   }
@@ -166,7 +166,8 @@ class MemorySinkSpec extends CatsResource[IO, MemorySink] with SpecificationLike
       processor = Processor(BuildInfo.name, BuildInfo.version)
       lookup = JavaNetRegistryLookup.ioLookupInstance[IO]
       httpClient <- EmberClientBuilder.default[IO].build
-    } yield new MemorySink(igluClient, lookup, enrichmentRegistry, OutputFormat.None, None, processor, enrichConfig, httpClient)
+      validationCache = new ValidationCache(None)
+    } yield new MemorySink(igluClient, lookup, enrichmentRegistry, OutputFormat.None, None, processor, enrichConfig, httpClient, validationCache)
   }
 
   private def buildJSEnrichment(): IO[JavascriptScriptEnrichment] = {

@@ -21,19 +21,15 @@ import org.http4s.circe.CirceEntityCodec.circeEntityDecoder
 import org.http4s.client.Client
 import org.http4s.implicits.http4sLiteralsSyntax
 import org.specs2.mutable.Specification
-import org.specs2.specification.BeforeAfterEach
 import org.http4s.client.middleware.{Retry, RetryPolicy}
 
 import scala.concurrent.duration.{Duration, DurationInt}
 
-class MicroApiSpec extends Specification with CatsEffect with BeforeAfterEach {
+class MicroApiSpec extends Specification with CatsEffect {
   sequential
 
   override protected val Timeout: Duration = 1.minute 
 
-  override protected def before: Unit = ValidationCache.reset()
-
-  override protected def after: Unit = ValidationCache.reset()
 
   "Micro should accept good data" in {
     setup().use { client =>
@@ -89,9 +85,52 @@ class MicroApiSpec extends Specification with CatsEffect with BeforeAfterEach {
     }
   }
 
-  private def setup(): Resource[IO, Client[IO]] = {
+  "Micro with --max-events 0 should disable micro endpoints" in {
+    setupWithArgs(List("--max-events", "0")).use { client =>
+      for {
+        allStatus <- client.run(Request(GET, uri"http://localhost:9090/micro/all")).use(r => IO.pure(r.status))
+        goodStatus <- client.run(Request(GET, uri"http://localhost:9090/micro/good")).use(r => IO.pure(r.status))
+        badStatus <- client.run(Request(GET, uri"http://localhost:9090/micro/bad")).use(r => IO.pure(r.status))
+        eventsStatus <- client.run(Request(GET, uri"http://localhost:9090/micro/events")).use(r => IO.pure(r.status))
+        uiStatus <- client.run(Request(GET, uri"http://localhost:9090/micro/ui")).use(r => IO.pure(r.status))
+        resetStatus <- client.run(Request(GET, uri"http://localhost:9090/micro/reset")).use(r => IO.pure(r.status))
+        igluStatus <- client.run(Request(GET, uri"http://localhost:9090/micro/iglu")).use(r => IO.pure(r.status))
+        // Health endpoint should still work
+        healthStatus <- client.run(Request(GET, uri"http://localhost:9090/health")).use(r => IO.pure(r.status))
+      } yield {
+        allStatus.code must_== 404
+        goodStatus.code must_== 404
+        badStatus.code must_== 404
+        eventsStatus.code must_== 404
+        uiStatus.code must_== 404
+        resetStatus.code must_== 404
+        igluStatus.code must_== 404
+        healthStatus.code must_== 200
+      }
+    }
+  }
+
+  "Micro with --max-events should limit cache size" in {
+    setupWithArgs(List("--max-events", "2")).use { client =>
+      for {
+        // Send 3 events
+        _ <- client.run(Request(GET, uri"http://localhost:9090/i?e=pp&p=web&tv=event1")).use_
+        _ <- client.run(Request(GET, uri"http://localhost:9090/i?e=pp&p=web&tv=event2")).use_
+        _ <- client.run(Request(GET, uri"http://localhost:9090/i?e=pp&p=web&tv=event3")).use_
+        _ <- IO.sleep(1.seconds)
+        all <- client.run(Request(GET, uri"http://localhost:9090/micro/all")).use(_.as[Json])
+      } yield {
+        // Should only keep 2 events due to rolling cache
+        all.noSpaces must beEqualTo("""{"total":2,"good":2,"bad":0}""")
+      }
+    }
+  }
+
+  private def setup(): Resource[IO, Client[IO]] = setupWithArgs(List.empty)
+
+  private def setupWithArgs(args: List[String]): Resource[IO, Client[IO]] = {
     for {
-      _ <- Main.run(List.empty).background
+      _ <- Main.run(args).background
       client <- buildClient()
       _ <- waitUntilHealthy(client)
     } yield client
