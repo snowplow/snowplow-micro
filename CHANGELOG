@@ -1,8 +1,13 @@
+Version 3.0.1 (2025-10-08)
+--------------------------
+Add --yauaa command line flag to enable YAUAA enrichment (#170)
+Add reset button to column picker selected tab (#173)
+Add --max-events command line option for memory control (#172)
+
 Version 3.0.0 (2025-10-03)
 --------------------------
 Add an endpoint that returns all events using the new failed event format (#169)
 Add a brand new UI (#171)
-
 
 Version 2.4.0 (2025-09-26)
 --------------------------
