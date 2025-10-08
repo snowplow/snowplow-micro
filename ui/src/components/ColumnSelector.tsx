@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Search, X } from 'lucide-react'
+import { Search, X, RotateCcw } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -13,6 +13,7 @@ type ColumnSelectorProps = {
   selectedColumns: ColumnMetadata[]
   onToggleColumn: (fieldName: string) => void
   onClose: () => void
+  onResetToDefaults: () => void
 }
 
 export function ColumnSelector({
@@ -20,12 +21,13 @@ export function ColumnSelector({
   selectedColumns,
   onToggleColumn,
   onClose,
+  onResetToDefaults,
 }: ColumnSelectorProps) {
   const [searchTerm, setSearchTerm] = useState('')
   const [selectedTab, setSelectedTab] = useState<
     'selected' | 'atomic' | 'events' | 'entities'
   >('selected')
-  const [initiallySelected] = useState<Set<string>>(new Set(selectedColumns.map(col => col.name)))
+  const [everSelected] = useState<Set<string>>(new Set(selectedColumns.map(col => col.name)))
   const searchInputRef = useRef<HTMLInputElement>(null)
 
   // Auto-focus search input when component mounts or tab changes
@@ -35,6 +37,12 @@ export function ColumnSelector({
     }
   }, [selectedTab])
 
+  // Keep once selected columns in the selected tab so that they don't disappear when unselected
+  const toggleAndKeep = (name: string) => {
+    everSelected.add(name)
+    onToggleColumn(name)
+  }
+
   const selected = new Set(selectedColumns.map(col => col.name))
 
   const filtered = availableColumns
@@ -42,7 +50,7 @@ export function ColumnSelector({
       const { name } = columnMetadata
       // Handle "Selected" tab - show initially selected columns OR currently selected columns
       if (selectedTab === 'selected') {
-        const matchesSelection = initiallySelected.has(name) || selected.has(name)
+        const matchesSelection = everSelected.has(name) || selected.has(name)
         if (!matchesSelection) return false
 
         // Filter by search term - search the full column name for selected tab
@@ -164,12 +172,12 @@ export function ColumnSelector({
                   className={`flex items-center gap-3 p-1 rounded hover:bg-muted/50 cursor-pointer transition-colors ${
                     shouldIndent ? 'ml-6' : ''
                   }`}
-                  onClick={() => onToggleColumn(name)}
+                  onClick={() => toggleAndKeep(name)}
                 >
                   {/* Checkbox on the left */}
                   <Checkbox
                     checked={selected.has(name)}
-                    onCheckedChange={() => onToggleColumn(name)}
+                    onCheckedChange={() => toggleAndKeep(name)}
                     onClick={(e) => e.stopPropagation()}
                   />
 
@@ -185,6 +193,19 @@ export function ColumnSelector({
             })
           )}
         </div>
+
+        {/* Reset button for selected tab */}
+        {selectedTab === 'selected' && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={onResetToDefaults}
+            className="w-full mt-3 border-t flex items-center gap-2"
+          >
+            <RotateCcw className="h-4 w-4" />
+            Reset
+          </Button>
+        )}
       </div>
     </TooltipProvider>
   )
