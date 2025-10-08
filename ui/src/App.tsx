@@ -46,7 +46,7 @@ function App() {
     }, 100)
   }
 
-  const { availableColumns, selectedColumns, toggleColumn, reorderColumns } =
+  const { availableColumns, selectedColumns, toggleColumn, reorderColumns, resetToDefaults } =
     useColumnManager({ events, setColumnFilters, onColumnAdded: scrollToLastColumn })
 
   // Filter events based on selected minute
@@ -321,6 +321,7 @@ function App() {
               selectedColumns={selectedColumns}
               onToggleColumn={toggleColumn}
               onClose={() => setShowColumnSelector(false)}
+              onResetToDefaults={resetToDefaults}
             />
           </div>
         )}

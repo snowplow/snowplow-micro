@@ -8,7 +8,7 @@ import { type ColumnMetadata, createColumnMetadata } from '@/utils/column-metada
 const STORAGE_KEY = 'snowplow-micro-selected-columns'
 
 // Default column configuration
-const DEFAULT_COLUMNS = ['collector_tstamp', 'app_id', 'event_name'] as const
+const DEFAULT_COLUMNS = ['collector_tstamp', 'app_id', 'event_name']
 
 /**
  * Save selected columns to localStorage
@@ -54,6 +54,7 @@ type UseColumnManagerReturn = {
   selectedColumns: ColumnMetadata[]
   toggleColumn: (fieldName: string) => void
   reorderColumns: (fromIndex: number, toIndex: number) => void
+  resetToDefaults: () => void
 }
 
 export function useColumnManager({
@@ -115,10 +116,17 @@ export function useColumnManager({
     setSelectedColumnNames(reordered)
   }
 
+  const resetToDefaults = () => {
+    const removedColumns = selectedColumnNames.filter(col => !DEFAULT_COLUMNS.includes(col))
+    setColumnFilters((filters) => filters.filter((f) => !removedColumns.includes(f.id)))
+    setSelectedColumnNames([...DEFAULT_COLUMNS])
+  }
+
   return {
     availableColumns,
     selectedColumns,
     toggleColumn,
     reorderColumns,
+    resetToDefaults,
   }
 }
