@@ -51,7 +51,7 @@ object Configuration {
       Uri.fromString(str).leftMap(_ => s"Invalid URI: $str").toValidatedNel
     }
 
-    final case class Config(collector: Option[Path], iglu: Option[Path], outputFormat: OutputFormat, destination: Option[Uri], maxEvents: Option[Int], yauaa: Boolean)
+    final case class Config(collector: Option[Path], iglu: Option[Path], outputFormat: OutputFormat, destination: Option[Uri], maxEvents: Option[Int], yauaa: Boolean, auth: Option[Path])
 
     private val collector = Opts.option[Path]("collector-config", "Path to HOCON configuration (optional)", "c", "config.hocon").orNone
     private val iglu = Opts.option[Path]("iglu", "Configuration file for Iglu Client (optional)", "i", "iglu.json").orNone
@@ -60,6 +60,7 @@ object Configuration {
     private val destination = Opts.option[Uri]("destination", "HTTP(s) URL to send output data to (requires --output-json or --output-tsv)", "d").orNone
     private val maxEvents = Opts.option[Int]("max-events", "Maximum number of events of each kind (good, bad) to keep in memory (setting this to 0 disables all /micro endpoints)", "m").orNone
     private val yauaa = Opts.flag("yauaa", "Enable YAUAA user agent enrichment").orFalse
+    private val auth = Opts.option[Path]("auth", "Path to Auth0 HOCON configuration file (optional)", "a", "auth.conf").orNone
 
     private val output = (outputTsv, outputJson, destination)
       .mapN { (_, _, _) }
@@ -71,8 +72,8 @@ object Configuration {
         case (true, true, _) => "Cannot specify both --output-tsv and --output-json".invalidNel[(OutputFormat, Option[Uri])]
       }
 
-    val config: Opts[Config] = (collector, iglu, output, maxEvents, yauaa).mapN {
-      case (c, i, (f, d), m, y) => Config(c, i, f, d, m, y)
+    val config: Opts[Config] = (collector, iglu, output, maxEvents, yauaa, auth).mapN {
+      case (c, i, (f, d), m, y, a) => Config(c, i, f, d, m, y, a)
     }
   }
 
@@ -88,13 +89,20 @@ object Configuration {
   type SinkConfig = DummySinkConfig
   implicit val dec: Decoder[DummySinkConfig] = Decoder.instance(_ => Right(DummySinkConfig()))
 
+  final case class AuthConfig(domain: String,
+                              apiDomain: String,
+                              audience: String,
+                              organizationId: String,
+                              clientId: String)
+
   final case class MicroConfig(collector: CollectorConfig[SinkConfig],
                                iglu: IgluResources,
                                enrichmentsConfig: List[EnrichmentConf],
                                enrichConfig: EnrichConfig,
                                outputFormat: OutputFormat,
                                destination: Option[Uri],
-                               maxEvents: Option[Int])
+                               maxEvents: Option[Int],
+                               auth: Option[AuthConfig])
 
   final case class EnrichValidation(atomicFieldsLimits: AtomicFields)
   final case class EnrichConfig(
@@ -114,7 +122,8 @@ object Configuration {
         enrichConfig <- loadEnrichConfig()
         igluResources <- loadIgluResources(cliConfig.iglu, enrichConfig.maxJsonDepth)
         enrichmentsConfig <- loadEnrichmentConfig(igluResources.client, cliConfig.yauaa)
-      } yield MicroConfig(collectorConfig, igluResources, enrichmentsConfig, enrichConfig, cliConfig.outputFormat, cliConfig.destination, cliConfig.maxEvents)
+        authConfig <- loadAuthConfig(cliConfig.auth)
+      } yield MicroConfig(collectorConfig, igluResources, enrichmentsConfig, enrichConfig, cliConfig.outputFormat, cliConfig.destination, cliConfig.maxEvents, authConfig)
     }
   }
 
@@ -180,6 +189,16 @@ object Configuration {
     //It's not configurable in micro, we load it from reference.conf provided by enrich
     loadConfig[EnrichConfig](path = None, resolveOrder)
   }
+
+  private def loadAuthConfig(authConfigPath: Option[Path]): EitherT[IO, String, Option[AuthConfig]] = {
+    authConfigPath match {
+      case Some(path) =>
+        loadConfig[AuthConfig](Some(path), identity).map(Some(_))
+      case None =>
+        EitherT.rightT[IO, String](None)
+    }
+  }
+
 
   private def buildIgluResources(resolverConfig: ResolverConfig, maxJsonDepth: Int): EitherT[IO, String, IgluResources] =
     for {
@@ -339,4 +358,6 @@ object Configuration {
     else
       Right(AtomicFields.from(fieldsLimits))
   }
+
+  implicit val authConfigDecoder: Decoder[AuthConfig] = deriveDecoder[AuthConfig]
 }
