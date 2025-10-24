@@ -10,6 +10,7 @@
 
 package com.snowplowanalytics.snowplow.micro
 
+import cats.data.{OptionT}
 import cats.effect.IO
 import com.snowplowanalytics.iglu.client.ClientError.ResolutionError
 import com.snowplowanalytics.iglu.client.resolver.Resolver
@@ -19,6 +20,8 @@ import com.snowplowanalytics.snowplow.analytics.scalasdk.Event
 import com.snowplowanalytics.snowplow.enrich.common.adapters.RawEvent
 import com.snowplowanalytics.snowplow.enrich.common.loaders.CollectorPayload
 import com.snowplowanalytics.snowplow.micro.Routing._
+import com.snowplowanalytics.snowplow.micro.Configuration.AuthConfig
+import cats.implicits._
 import io.circe.generic.semiauto.{deriveDecoder, deriveEncoder}
 import io.circe.syntax.EncoderOps
 import io.circe.{Decoder, Encoder}
@@ -27,16 +30,13 @@ import org.http4s.circe.CirceEntityDecoder._
 import org.http4s.circe.CirceEntityEncoder._
 import org.http4s.dsl.Http4sDsl
 import org.http4s.{HttpRoutes, Response, StaticFile}
+import org.http4s.AuthedRoutes
 import org.joda.time.DateTime
 
-final class Routing(igluResolver: Resolver[IO], validationCache: ValidationCache)
+final class Routing(igluResolver: Resolver[IO], validationCache: ValidationCache, authConfig: Option[AuthConfig])
                    (implicit lookup: RegistryLookup[IO]) extends Http4sDsl[IO] {
 
-  val disabled: HttpRoutes[IO] = HttpRoutes.of[IO] {
-    case _ -> "micro" /: _ => NotFound()
-  }
-
-  val enabled: HttpRoutes[IO] = HttpRoutes.of[IO] {
+  private val baseRoutes: HttpRoutes[IO] = HttpRoutes.of[IO] {
     case request@method -> "micro" /: path =>
       (method, path.segments.headOption.map(_.encoded)) match {
         case (GET, Some("events")) =>
@@ -65,20 +65,50 @@ final class Routing(igluResolver: Resolver[IO], validationCache: ValidationCache
             case _ =>
               NotFound("Schema lookup should be in format iglu/{vendor}/{schemaName}/jsonschema/{model}-{revision}-{addition}")
           }
-        case (GET, Some("ui")) =>
-          handleUIPath(path)
         case _ =>
           NotFound("Path for micro has to be one of: /events /all /good /bad /reset /iglu")
       }
   }
 
-  private def handleUIPath(path: Path): IO[Response[IO]] = {
-    path match {
-      case Path.empty / "ui" | Path.empty / "ui" / "/" =>
-        resource("ui/index.html")
-      case other =>
-        resource(other.renderString)
+  private val authConfigRoute: HttpRoutes[IO] = HttpRoutes.of[IO] {
+    case GET -> Root / "micro" / "auth-config" =>
+      authConfig match {
+        case Some(config) =>
+          Ok(AuthConfigResponse(config.domain, config.audience, config.clientId).asJson)
+        case None =>
+          Ok(AuthConfigResponse("", "", "", enabled = false).asJson)
+      }
+  }
+
+  private val uiRoutes: HttpRoutes[IO] = HttpRoutes.of[IO] {
+    case GET -> "micro" /: path if path.segments.headOption.map(_.encoded).contains("ui") =>
+      path match {
+        case Path.empty / "ui" | Path.empty / "ui" / "/" =>
+          resource("ui/index.html")
+        case other =>
+          resource(other.renderString)
+      }
+  }
+
+  val disabled: HttpRoutes[IO] = HttpRoutes.of[IO] {
+    case _ -> "micro" /: _ => NotFound()
+  }
+
+  val enabled: HttpRoutes[IO] = {
+    val apiRoutes = authConfig match {
+      case Some(config) =>
+        val authedRoutes = AuthedRoutes[Unit, IO](req => baseRoutes(req.req))
+        val middleware = Auth.authMiddleware(config)(authedRoutes)
+        HttpRoutes[IO] { req =>
+          // prevent eagerly requiring auth for everything
+          // we need to bypass auth and fall through into collector routes that will come later
+          if (req.pathInfo.startsWith(Root / "micro")) middleware(req) else OptionT.none
+        }
+      case None =>
+        baseRoutes
     }
+
+    uiRoutes <+> authConfigRoute <+> apiRoutes
   }
 
   private def resource(path: String): IO[Response[IO]] = {
@@ -100,12 +130,15 @@ final class Routing(igluResolver: Resolver[IO], validationCache: ValidationCache
 }
 
 object Routing {
+  case class AuthConfigResponse(domain: String, audience: String, clientId: String, enabled: Boolean = true)
+
   implicit val dateTimeEncoder: Encoder[DateTime] =
     Encoder[String].contramap(_.toString)
 
   implicit val nameValuePairEncoder: Encoder[NameValuePair] =
     Encoder[String].contramap(kv => s"${kv.getName}=${kv.getValue}")
 
+  implicit val acr: Encoder[AuthConfigResponse] = deriveEncoder
   implicit val vs: Encoder[ValidationSummary] = deriveEncoder
   implicit val ge: Encoder[GoodEvent] = deriveEncoder
   implicit val rwe: Encoder[RawEvent] = deriveEncoder

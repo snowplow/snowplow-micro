@@ -81,7 +81,7 @@ object Run {
         IO.pure(true)
       )
 
-      microRouting = new Routing(config.iglu.resolver, validationCache)(lookup)
+      microRouting = new Routing(config.iglu.resolver, validationCache, config.auth)(lookup)
       microRoutes = if (config.maxEvents.contains(0)) microRouting.disabled else microRouting.enabled
       allRoutes = microRoutes <+> collectorRoutes.value <+> collectorRoutes.health
       _ <- MicroHttpServer.build(allRoutes, config, sslContext)

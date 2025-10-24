@@ -35,6 +35,7 @@ lazy val dependencies = Seq(
     Dependencies.snowplowAnalyticsSdk,
     Dependencies.decline,
     Dependencies.http4sCirce,
+    Dependencies.http4sClient,
     Dependencies.circeJawn,
     Dependencies.circeGeneric,
     Dependencies.specs2,
