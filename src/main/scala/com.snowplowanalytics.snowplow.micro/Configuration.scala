@@ -58,9 +58,15 @@ object Configuration {
       Uri.fromString(str).leftMap(_ => s"Invalid URI: $str").toValidatedNel
     }
 
-    final case class Config(collector: Option[Path], iglu: Option[Path], outputFormat: OutputFormat, destination: Option[Uri], yauaa: Boolean, storage: StorageConfig)
+    final case class Config(collector: Option[Path],
+                            iglu: Option[Path],
+                            outputFormat: OutputFormat,
+                            destination: Option[Uri],
+                            yauaa: Boolean,
+                            storage: StorageConfig,
+                            auth: Option[Path])
 
-    private val collector = Opts.option[Path]("collector-config", "Path to HOCON configuration", "c", "config.hocon").orNone
+    private val collector = Opts.option[Path]("collector-config", "Configuration file for Collector", "c", "config.hocon").orNone
     private val iglu = Opts.option[Path]("iglu", "Configuration file for Iglu Client", "i", "iglu.json").orNone
     private val outputTsv = Opts.flag("output-tsv", "Output events in TSV format to standard output or HTTP destination", "t").orFalse
     private val outputJson = Opts.flag("output-json", "Output events in JSON format to standard output or HTTP destination (with a separate key for each schema)", "j").orFalse
@@ -68,6 +74,7 @@ object Configuration {
     private val storagePath = Opts.option[Path]("storage", "Path to an SQLite database file for persistent storage", "s").orNone
     private val maxEvents = Opts.option[Int]("max-events", "Maximum number of events to store (enforced approximately, non-zero values require --storage)", "m").orNone
     private val yauaa = Opts.flag("yauaa", "Enable YAUAA user agent enrichment").orFalse
+    private val auth = Opts.option[Path]("auth", "Configuration file for authentication", "a", "auth.hocon").orNone
 
     private val output = (outputTsv, outputJson, destination)
       .mapN { (_, _, _) }
@@ -89,8 +96,8 @@ object Configuration {
         case (None, None) => StorageConfig.InMemory.validNel[String]
       }
 
-    val config: Opts[Config] = (collector, iglu, output, yauaa, storage).mapN {
-      case (c, i, (f, d), y, s) => Config(c, i, f, d, y, s)
+    val config: Opts[Config] = (collector, iglu, output, yauaa, storage, auth).mapN {
+      case (c, i, (f, d), y, s, a) => Config(c, i, f, d, y, s, a)
     }
   }
 
@@ -108,13 +115,20 @@ object Configuration {
   type SinkConfig = DummySinkConfig
   implicit val dec: Decoder[DummySinkConfig] = Decoder.instance(_ => Right(DummySinkConfig()))
 
+  final case class AuthConfig(domain: String,
+                              apiDomain: String,
+                              audience: String,
+                              organizationId: String,
+                              clientId: String)
+
   final case class MicroConfig(collector: CollectorConfig[SinkConfig],
                                iglu: IgluResources,
                                enrichmentsConfig: List[EnrichmentConf],
                                enrichConfig: EnrichConfig,
                                outputFormat: OutputFormat,
                                destination: Option[Uri],
-                               storage: StorageConfig)
+                               storage: StorageConfig,
+                               auth: Option[AuthConfig])
 
   final case class EnrichValidation(atomicFieldsLimits: AtomicFields)
   final case class EnrichConfig(
@@ -134,7 +148,11 @@ object Configuration {
         enrichConfig <- loadEnrichConfig()
         igluResources <- loadIgluResources(cliConfig.iglu, enrichConfig.maxJsonDepth)
         enrichmentsConfig <- loadEnrichmentConfig(igluResources.client, cliConfig.yauaa)
-      } yield MicroConfig(collectorConfig, igluResources, enrichmentsConfig, enrichConfig, cliConfig.outputFormat, cliConfig.destination, cliConfig.storage)
+        authConfig <- loadAuthConfig(cliConfig.auth)
+      } yield MicroConfig(
+        collectorConfig, igluResources, enrichmentsConfig, enrichConfig,
+        cliConfig.outputFormat, cliConfig.destination, cliConfig.storage, authConfig
+      )
     }
   }
 
@@ -200,6 +218,16 @@ object Configuration {
     //It's not configurable in micro, we load it from reference.conf provided by enrich
     loadConfig[EnrichConfig](path = None, resolveOrder)
   }
+
+  private def loadAuthConfig(authConfigPath: Option[Path]): EitherT[IO, String, Option[AuthConfig]] = {
+    authConfigPath match {
+      case Some(path) =>
+        loadConfig[AuthConfig](Some(path), identity).map(Some(_))
+      case None =>
+        EitherT.rightT[IO, String](None)
+    }
+  }
+
 
   private def buildIgluResources(resolverConfig: ResolverConfig, maxJsonDepth: Int): EitherT[IO, String, IgluResources] =
     for {
@@ -359,4 +387,6 @@ object Configuration {
     else
       Right(AtomicFields.from(fieldsLimits))
   }
+
+  implicit val authConfigDecoder: Decoder[AuthConfig] = deriveDecoder[AuthConfig]
 }

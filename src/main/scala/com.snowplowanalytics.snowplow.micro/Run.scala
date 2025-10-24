@@ -59,7 +59,7 @@ object Run {
       lookup = JavaNetRegistryLookup.ioLookupInstance[IO]
       queue <- Resource.eval(Queue.unbounded[IO, CollectorPayload])
       storage <- EventStorage.create(config.storage)
-      microRoutes = Routing.create(config, storage, lookup)
+      microRoutes = Routing.create(config, storage, config.auth, lookup)
       sink = new EventSink(config.iglu.client, lookup, enrichmentRegistry, config.outputFormat, config.destination, badProcessor, config.enrichConfig, httpClient, storage)
       sinks = Sinks(sink, sink)
       _ <- Sinks

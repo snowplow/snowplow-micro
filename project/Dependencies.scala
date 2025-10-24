@@ -45,9 +45,10 @@ object Dependencies {
   val snowplowCommonEnrich    = "com.snowplowanalytics" %% "snowplow-common-enrich"                % V.snowplowCommonEnrich
   val snowplowAnalyticsSdk    = "com.snowplowanalytics" %% "snowplow-scala-analytics-sdk"          % V.snowplowAnalyticsSdk
   
-  val http4sCirce = "org.http4s"    %% "http4s-circe"   % V.http4sCirce 
-  val decline     = "com.monovore"  %% "decline-effect" % V.decline
-  val slf4jSimple = "org.slf4j"     %  "slf4j-simple"   % V.slf4j
+  val http4sCirce  = "org.http4s"    %% "http4s-circe"        % V.http4sCirce
+  val http4sClient = "org.http4s"    %% "http4s-ember-client" % V.http4sCirce
+  val decline      = "com.monovore"  %% "decline-effect"      % V.decline
+  val slf4jSimple  = "org.slf4j"     %  "slf4j-simple"        % V.slf4j
 
   // circe
   val circeJawn    = "io.circe" %% "circe-jawn"    % V.circe

@@ -53,42 +53,36 @@ export type EventsResponse = {
 
 export class EventsApiService {
   /**
-   * Fetch events from the snowplow-micro backend
+   * Make a request with optional authentication
    */
-  static async fetchEvents(): Promise<Event[]> {
-    const url = new URL('/micro/events', window.location.origin)
-
-    const response = await fetch(url.toString(), {
-      method: 'GET',
-      headers: {
-        Accept: 'application/json',
-      },
-    })
-
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+  private static async makeRequest(url: string, options: RequestInit = {}, token?: string | null): Promise<Response> {
+    if (token) {
+      options.headers = {
+        ...options.headers,
+        Authorization: `Bearer ${token}`,
+      }
     }
 
-    const data = await response.json()
-    return data as Event[]
+    return fetch(url, options)
   }
 
   /**
    * Fetch filtered events using server-side filtering
    */
   static async fetchFilteredEvents(
-    request: EventsRequest
+    request: EventsRequest,
+    token?: string | null
   ): Promise<EventsResponse> {
     const url = new URL('/micro/events', window.location.origin)
 
-    const response = await fetch(url.toString(), {
+    const response = await this.makeRequest(url.toString(), {
       method: 'POST',
       headers: {
         Accept: 'application/json',
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(request),
-    })
+    }, token)
 
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}: ${response.statusText}`)
@@ -101,29 +95,29 @@ export class EventsApiService {
   /**
    * Reset all events by calling the /micro/reset endpoint
    */
-  static async resetEvents(): Promise<void> {
+  static async resetEvents(token?: string | null): Promise<void> {
     const url = new URL('/micro/reset', window.location.origin)
 
-    await fetch(url.toString(), {
+    await this.makeRequest(url.toString(), {
       method: 'POST',
       headers: {
         Accept: 'application/json',
       },
-    })
+    }, token)
   }
 
   /**
    * Fetch available column names from the backend
    */
-  static async fetchColumns(): Promise<string[]> {
+  static async fetchColumns(token?: string | null): Promise<string[]> {
     const url = new URL('/micro/columns', window.location.origin)
 
-    const response = await fetch(url.toString(), {
+    const response = await this.makeRequest(url.toString(), {
       method: 'GET',
       headers: {
         Accept: 'application/json',
       },
-    })
+    }, token)
 
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}: ${response.statusText}`)
@@ -136,15 +130,15 @@ export class EventsApiService {
   /**
    * Fetch timeline data from the backend
    */
-  static async fetchTimeline(): Promise<TimelineData> {
+  static async fetchTimeline(token?: string | null): Promise<TimelineData> {
     const url = new URL('/micro/timeline', window.location.origin)
 
-    const response = await fetch(url.toString(), {
+    const response = await this.makeRequest(url.toString(), {
       method: 'GET',
       headers: {
         Accept: 'application/json',
       },
-    })
+    }, token)
 
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}: ${response.statusText}`)
@@ -158,18 +152,19 @@ export class EventsApiService {
    * Fetch column statistics from the backend
    */
   static async fetchColumnStats(
-    columns: string[]
+    columns: string[],
+    token?: string | null
   ): Promise<Record<string, ColumnStats>> {
     const url = new URL('/micro/columnStats', window.location.origin)
 
-    const response = await fetch(url.toString(), {
+    const response = await this.makeRequest(url.toString(), {
       method: 'POST',
       headers: {
         Accept: 'application/json',
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ columns }),
-    })
+    }, token)
 
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}: ${response.statusText}`)
