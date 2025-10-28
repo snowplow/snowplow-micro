@@ -11,6 +11,7 @@
 package com.snowplowanalytics.snowplow.micro
 
 import cats.effect.IO
+import cats.implicits.toSemigroupKOps
 import com.snowplowanalytics.iglu.client.ClientError.ResolutionError
 import com.snowplowanalytics.iglu.client.resolver.Resolver
 import com.snowplowanalytics.iglu.client.resolver.registries.RegistryLookup
@@ -29,47 +30,19 @@ import org.http4s.dsl.Http4sDsl
 import org.http4s.{HttpRoutes, Response, StaticFile}
 import org.joda.time.DateTime
 
-final class Routing(igluResolver: Resolver[IO], validationCache: ValidationCache)
-                   (implicit lookup: RegistryLookup[IO]) extends Http4sDsl[IO] {
+sealed trait BaseRouting[S <: EventStorage] extends Http4sDsl[IO] {
+  protected def igluResolver: Resolver[IO]
+  protected def storage: S
+  protected implicit def lookup: RegistryLookup[IO]
 
-  val disabled: HttpRoutes[IO] = HttpRoutes.of[IO] {
-    case _ -> "micro" /: _ => NotFound()
-  }
-
-  val enabled: HttpRoutes[IO] = HttpRoutes.of[IO] {
-    case request@method -> "micro" /: path =>
-      (method, path.segments.headOption.map(_.encoded)) match {
-        case (GET, Some("events")) =>
-          Ok(validationCache.getGoodAndIncomplete.map(_.event.toJson(lossy = true)))
-        case (POST | GET, Some("all")) =>
-          Ok(validationCache.getSummary())
-        case (POST | GET, Some("reset")) =>
-          validationCache.reset()
-          Ok(validationCache.getSummary())
-        case (GET, Some("good")) =>
-          Ok(validationCache.filterGood(FiltersGood(None, None, None, None)))
-        case (POST, Some("good")) =>
-          request.as[FiltersGood].flatMap { filters =>
-            Ok(validationCache.filterGood(filters).asJson)
-          }
-        case (GET, Some("bad")) =>
-          Ok(validationCache.filterBad(FiltersBad(None, None, None)))
-        case (POST, Some("bad")) =>
-          request.as[FiltersBad].flatMap { filters =>
-            Ok(validationCache.filterBad(filters))
-          }
-        case (GET, Some("iglu")) =>
-          path match {
-            case Path.empty / "iglu" / vendor / name / "jsonschema" / versionVar =>
-              lookupSchema(vendor, name, versionVar)
-            case _ =>
-              NotFound("Schema lookup should be in format iglu/{vendor}/{schemaName}/jsonschema/{model}-{revision}-{addition}")
-          }
-        case (GET, Some("ui")) =>
-          handleUIPath(path)
-        case _ =>
-          NotFound("Path for micro has to be one of: /events /all /good /bad /reset /iglu")
-      }
+  /** Common routes for iglu, ui, and reset endpoints */
+  def commonRoutes: HttpRoutes[IO] = HttpRoutes.of[IO] {
+    case (POST | GET) -> Root / "micro" / "reset" =>
+      storage.reset().flatMap(_ => Ok("Reset completed"))
+    case GET -> Root / "micro" / "iglu" / vendor / name / "jsonschema" / versionVar =>
+      lookupSchema(vendor, name, versionVar)
+    case GET -> "micro" /: path if path.startsWithString("ui") =>
+      handleUIPath(path)
   }
 
   private def handleUIPath(path: Path): IO[Response[IO]] = {
@@ -99,7 +72,62 @@ final class Routing(igluResolver: Resolver[IO], validationCache: ValidationCache
   }
 }
 
+final class InMemoryRouting(protected val igluResolver: Resolver[IO], protected val storage: InMemoryStorage)
+                           (implicit protected val lookup: RegistryLookup[IO]) extends BaseRouting[InMemoryStorage] {
+  private val inMemoryRoutes: HttpRoutes[IO] = HttpRoutes.of[IO] {
+    case GET -> Root / "micro" / "events" =>
+      Ok(storage.getGoodAndIncomplete.map(_.event.toJson(lossy = true)))
+    case (POST | GET) -> Root / "micro" / "all" =>
+      Ok(storage.getSummary())
+    case GET -> Root / "micro" / "good" =>
+      Ok(storage.filterGood(FiltersGood(None, None, None, None)))
+    case request @ POST -> Root / "micro" / "good" =>
+      request.as[FiltersGood].flatMap { filters =>
+        Ok(storage.filterGood(filters).asJson)
+      }
+    case GET -> Root / "micro" / "bad" =>
+      Ok(storage.filterBad(FiltersBad(None, None, None)))
+    case request @ POST -> Root / "micro" / "bad" =>
+      request.as[FiltersBad].flatMap { filters =>
+        Ok(storage.filterBad(filters))
+      }
+    case _ -> "micro" /: _ =>
+      NotFound("Supported endpoints: /micro/events, /micro/all, /micro/good, /micro/bad, /micro/reset, /micro/iglu, /micro/ui")
+  }
+
+  val routes: HttpRoutes[IO] = commonRoutes <+> inMemoryRoutes
+}
+
+final class SqliteRouting(protected val igluResolver: Resolver[IO],
+                          protected val storage: SqliteStorage)
+                         (implicit protected val lookup: RegistryLookup[IO]) extends BaseRouting[SqliteStorage] {
+  private val sqliteRoutes: HttpRoutes[IO] = HttpRoutes.of[IO] {
+    case GET -> Root / "micro" / "events" =>
+      storage.getEvents.flatMap(events => Ok(events))
+    case _ -> "micro" /: _ =>
+      NotFound("Supported endpoints: /micro/events, /micro/reset, /micro/iglu, /micro/ui")
+  }
+
+  val routes: HttpRoutes[IO] = commonRoutes <+> sqliteRoutes
+}
+
+object NoRoutes extends Http4sDsl[IO] {
+  val routes: HttpRoutes[IO] = HttpRoutes.of[IO] {
+    case _ -> "micro" /: _ => NotFound()
+  }
+}
+
 object Routing {
+  def create(config: Configuration.MicroConfig, storage: EventStorage, lookup: RegistryLookup[IO]): HttpRoutes[IO] = {
+    storage match {
+      case NoStorage => NoRoutes.routes
+      case sqliteStorage: SqliteStorage =>
+        new SqliteRouting(config.iglu.resolver, sqliteStorage)(lookup).routes
+      case inMemoryStorage: InMemoryStorage =>
+        new InMemoryRouting(config.iglu.resolver, inMemoryStorage)(lookup).routes
+    }
+  }
+
   implicit val dateTimeEncoder: Encoder[DateTime] =
     Encoder[String].contramap(_.toString)
 

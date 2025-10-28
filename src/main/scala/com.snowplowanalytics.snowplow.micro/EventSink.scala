@@ -42,15 +42,15 @@ import java.time.Instant
  * For each event it tries to validate it using Common Enrich,
  * and then stores the results in-memory in [[ValidationCache]].
  */
-final class MemorySink(igluClient: IgluCirceClient[IO],
-                       registryLookup: RegistryLookup[IO],
-                       enrichmentRegistry: EnrichmentRegistry[IO],
-                       outputFormat: OutputFormat,
-                       destination: Option[Uri],
-                       processor: Processor,
-                       enrichConfig: EnrichConfig,
-                       httpClient: Client[IO],
-                       private[micro] val validationCache: ValidationCache) extends Sink[IO] {
+final class EventSink(igluClient: IgluCirceClient[IO],
+                      registryLookup: RegistryLookup[IO],
+                      enrichmentRegistry: EnrichmentRegistry[IO],
+                      outputFormat: OutputFormat,
+                      destination: Option[Uri],
+                      processor: Processor,
+                      enrichConfig: EnrichConfig,
+                      httpClient: Client[IO],
+                      private[micro] val storage: EventStorage) extends Sink[IO] {
   override val maxBytes = Int.MaxValue
   private lazy val logger = LoggerFactory.getLogger("EventLog")
 
@@ -109,19 +109,19 @@ final class MemorySink(igluClient: IgluCirceClient[IO],
             }
             partitionEvents.flatMap {
               case (goodEvents, badEvents) =>
-                validationCache.addToGood(goodEvents)
-                validationCache.addToBad(badEvents)
+                storage.addToGood(goodEvents) >>
+                storage.addToBad(badEvents) >>
                 sendOutput(goodEvents)
             }
           case Validated.Invalid(badRow) =>
             val bad = BadEvent(Some(collectorPayload), None, List("Error while extracting event(s) from collector payload and validating it/them.", badRow.compact))
             logger.warn(s"BAD ${bad.errors.head}")
-            IO(validationCache.addToBad(List(bad)))
+            storage.addToBad(List(bad))
         }
       case Validated.Invalid(badRows) =>
         val bad = BadEvent(None, None, List("Can't deserialize Thrift bytes.") ++ badRows.toList.map(_.compact))
         logger.warn(s"BAD ${bad.errors.head}")
-        IO(validationCache.addToBad(List(bad)))
+        storage.addToBad(List(bad))
     }
 
   /** Validate the raw event using Common Enrich logic, and extract the event type if any,

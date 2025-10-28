@@ -15,7 +15,7 @@ import com.snowplowanalytics.snowplow.enrich.common.loaders.CollectorPayload
 import com.snowplowanalytics.snowplow.analytics.scalasdk.Event
 
 /** A list of this case class is returned when /micro/good is queried. */
-private [micro] final case class GoodEvent(
+final case class GoodEvent(
   rawEvent: RawEvent,
   eventType: Option[String],
   schema: Option[String],
@@ -25,7 +25,7 @@ private [micro] final case class GoodEvent(
 )
 
 /** A list of this case class is returned when /micro/bad is queried. */
-private [micro] final case class BadEvent(
+final case class BadEvent(
   collectorPayload: Option[CollectorPayload],
   rawEvent: Option[RawEvent],
   errors: List[String]

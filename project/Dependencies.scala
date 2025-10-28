@@ -23,9 +23,15 @@ object Dependencies {
 
     val decline          = "2.4.1"
     val slf4j            = "2.0.17"
-    
+
     // circe
     val circe = "0.14.2"
+
+    // doobie
+    val doobie = "1.0.0-RC10"
+
+    // sqlite
+    val sqlite = "3.50.3.0"
 
     // specs2
     val specs2        = "4.12.2"
@@ -46,6 +52,13 @@ object Dependencies {
   // circe
   val circeJawn    = "io.circe" %% "circe-jawn"    % V.circe
   val circeGeneric = "io.circe" %% "circe-generic" % V.circe
+
+  // doobie
+  val doobieCore   = "org.tpolecat" %% "doobie-core"   % V.doobie
+  val doobieHikari = "org.tpolecat" %% "doobie-hikari" % V.doobie
+
+  // sqlite
+  val sqliteJdbc = "org.xerial" % "sqlite-jdbc" % V.sqlite
 
   // specs2
   val specs2       = "org.specs2"     %% "specs2-core"                % V.specs2    % Test
