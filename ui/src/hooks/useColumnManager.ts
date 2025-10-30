@@ -1,8 +1,7 @@
 import { useState, useMemo, useEffect } from 'react'
 
-import { type Event } from '@/services/api'
+import { EventsApiService } from '@/services/api'
 import type { ColumnFiltersState, OnChangeFn } from '@tanstack/react-table'
-import { discoverAllFields } from '@/utils/json-fields'
 import { type ColumnMetadata, createColumnMetadata } from '@/utils/column-metadata'
 
 const STORAGE_KEY = 'snowplow-micro-selected-columns'
@@ -44,7 +43,6 @@ function loadSelectedColumns(): string[] {
 }
 
 type UseColumnManagerProps = {
-  events: Event[]
   setColumnFilters: OnChangeFn<ColumnFiltersState>
   onColumnAdded?: () => void
 }
@@ -55,20 +53,30 @@ type UseColumnManagerReturn = {
   toggleColumn: (fieldName: string) => void
   reorderColumns: (fromIndex: number, toIndex: number) => void
   resetToDefaults: () => void
+  refreshColumns: () => Promise<void>
 }
 
 export function useColumnManager({
-  events,
   setColumnFilters,
   onColumnAdded,
 }: UseColumnManagerProps): UseColumnManagerReturn {
   const [selectedColumnNames, setSelectedColumnNames] = useState<string[]>(
     loadSelectedColumns()
   )
+  const [backendColumns, setBackendColumns] = useState<string[]>([])
 
   useEffect(() => {
     saveSelectedColumns(selectedColumnNames)
   }, [selectedColumnNames])
+
+  useEffect(() => {
+    EventsApiService.fetchColumns()
+      .then(setBackendColumns)
+      .catch(error => {
+        console.error('Failed to fetch columns from backend:', error)
+        setBackendColumns([])
+      })
+  }, [])
 
   const selectedColumns = useMemo(() => {
     return selectedColumnNames.map(createColumnMetadata)
@@ -82,7 +90,7 @@ export function useColumnManager({
     const set = new Set([
       ...selectedColumnNames,
       ...parentsOfSelected,
-      ...discoverAllFields(events),
+      ...backendColumns,
     ])
 
     // Remove failure entity, br_ fields, and all their nested fields
@@ -94,7 +102,7 @@ export function useColumnManager({
     )
 
     return filteredColumnNames.map(createColumnMetadata)
-  }, [events, selectedColumnNames])
+  }, [backendColumns, selectedColumnNames])
 
   const toggleColumn = (fieldName: string) => {
     if (selectedColumnNames.includes(fieldName)) {
@@ -122,11 +130,21 @@ export function useColumnManager({
     setSelectedColumnNames([...DEFAULT_COLUMNS])
   }
 
+  const refreshColumns = async () => {
+    try {
+      const columns = await EventsApiService.fetchColumns()
+      setBackendColumns(columns)
+    } catch (error) {
+      console.error('Failed to refresh columns from backend:', error)
+    }
+  }
+
   return {
     availableColumns,
     selectedColumns,
     toggleColumn,
     reorderColumns,
     resetToDefaults,
+    refreshColumns,
   }
 }

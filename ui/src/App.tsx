@@ -46,8 +46,8 @@ function App() {
     }, 100)
   }
 
-  const { availableColumns, selectedColumns, toggleColumn, reorderColumns, resetToDefaults } =
-    useColumnManager({ events, setColumnFilters, onColumnAdded: scrollToLastColumn })
+  const { availableColumns, selectedColumns, toggleColumn, reorderColumns, resetToDefaults, refreshColumns } =
+    useColumnManager({ setColumnFilters, onColumnAdded: scrollToLastColumn })
 
   // Filter events based on selected minute
   const filteredEvents = events.filter((event) => {
@@ -70,6 +70,7 @@ function App() {
       const fetchedEvents = await EventsApiService.fetchEvents()
       setEvents(fetchedEvents)
       setLastRefreshTime(new Date())
+      await refreshColumns()
     } catch (err) {
       console.error('Failed to fetch events:', err)
     } finally {
@@ -88,6 +89,8 @@ function App() {
       await EventsApiService.resetEvents()
       setEvents([])
       setSelectedMinute(null)
+      // columns will also have been reset
+      await refreshColumns()
     } catch (err) {
       console.error('Failed to reset events:', err)
     } finally {

@@ -38,4 +38,25 @@ export class EventsApiService {
       },
     })
   }
+
+  /**
+   * Fetch available column names from the backend
+   */
+  static async fetchColumns(): Promise<string[]> {
+    const url = new URL('/micro/columns', window.location.origin)
+
+    const response = await fetch(url.toString(), {
+      method: 'GET',
+      headers: {
+        Accept: 'application/json',
+      },
+    })
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+    }
+
+    const data = await response.json()
+    return data as string[]
+  }
 }
