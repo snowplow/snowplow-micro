@@ -15,7 +15,7 @@ import cats.effect.IO
 import org.specs2.mutable.Specification
 import io.circe.Json
 
-class SqliteStorageSpec extends Specification {
+class SqliteStorageSpec extends Specification with EventStorageTimelineSpec {
   import InMemoryStorageSpec._
   import SqliteStorageSpec._
 
@@ -109,6 +109,24 @@ class SqliteStorageSpec extends Specification {
     "should return empty list when no events" >> {
       withSqliteStorage() { storage =>
         storage.getEvents.map(_.size must_== 0)
+      }
+    }
+  }
+
+  timelineTests(SqliteStorage.inMemory(None), "SqliteStorage")
+
+  "getTimeline with maxEvents limit" >> {
+    "should handle timeline with maxEvents limit" >> {
+      withSqliteStorage(Some(2)) { storage =>
+        for {
+          _ <- storage.addToGood(List(GoodEvent1, GoodEvent2, GoodEvent3))
+          timeline <- storage.getTimeline
+        } yield {
+          timeline.points must have size(31)
+          val pointsWithEvents = timeline.points.filter(p => p.validEvents > 0 || p.failedEvents > 0)
+          // Should still show timeline based on all events in database (limited by cleanup probability)
+          pointsWithEvents must have size(be_>=(1))
+        }
       }
     }
   }

@@ -80,7 +80,7 @@ private[micro] class InMemoryStorage extends EventStorage {
 
   def getColumns: IO[List[String]] = {
     getEvents.map { jsonEvents =>
-      jsonEvents.map(extractColumnsFromEvent)
+      jsonEvents.map(EventStorage.extractColumnsFromEvent)
         .fold(Set.empty[String])(_.union(_))
         .toList
         .sorted
@@ -89,14 +89,14 @@ private[micro] class InMemoryStorage extends EventStorage {
 
   def getTimeline: IO[TimelineData] = IO.delay {
     val groupedByMinute = LockGood.synchronized {
-      good.groupBy(event => roundToMinute(event.event.collector_tstamp.toEpochMilli))
+      good.groupBy(event => EventStorage.roundToMinute(event.event.collector_tstamp.toEpochMilli))
         .map {
           case (minute, events) =>
             val (failed, valid) = events.partition(_.incomplete)
             TimelinePoint(valid.size, failed.size, minute)
         }.toList
     }
-    val filledPoints = fillMissingMinutes(groupedByMinute)
+    val filledPoints = EventStorage.fillMissingMinutes(groupedByMinute)
     TimelineData(filledPoints)
   }
 

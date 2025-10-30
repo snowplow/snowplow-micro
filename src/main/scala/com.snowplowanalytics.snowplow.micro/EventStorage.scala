@@ -25,12 +25,36 @@ trait EventStorage {
   def getEvents: IO[List[Json]]
   def getColumns: IO[List[String]]
   def getTimeline: IO[TimelineData]
+}
 
-  protected def roundToMinute(timestamp: Long): Long = {
+object NoStorage extends EventStorage {
+  def addToGood(events: List[GoodEvent]): IO[Unit] = IO.unit
+  def addToBad(events: List[BadEvent]): IO[Unit] = IO.unit
+  def reset(): IO[Unit] = IO.unit
+  def getEvents: IO[List[Json]] = IO.pure(List.empty)
+  def getColumns: IO[List[String]] = IO.pure(List.empty)
+  def getTimeline: IO[TimelineData] = IO.pure(TimelineData(List.empty))
+}
+
+object EventStorage {
+  def create(config: MicroConfig): Resource[IO, EventStorage] = {
+    (config.storage, config.maxEvents) match {
+      case (_, Some(0)) =>
+        Resource.pure(NoStorage)
+      case (Some(storagePath), maxEvents) =>
+        SqliteStorage.file(storagePath.toString, maxEvents)
+      case (None, Some(maxEvents)) =>
+        SqliteStorage.inMemory(Some(maxEvents))
+      case (None, None) =>
+        Resource.pure(new InMemoryStorage())
+    }
+  }
+
+  def roundToMinute(timestamp: Long): Long = {
     (timestamp / 60000) * 60000
   }
 
-  protected def fillMissingMinutes(points: List[TimelinePoint]): List[TimelinePoint] = {
+  def fillMissingMinutes(points: List[TimelinePoint]): List[TimelinePoint] = {
     // the first point is the latest one
     val latestTime = points.headOption.fold(roundToMinute(System.currentTimeMillis()))(_.timestamp)
     val startTime = latestTime - 30 * 60000
@@ -41,7 +65,7 @@ trait EventStorage {
     }
   }
 
-  protected def extractColumnsFromEvent(eventJson: Json): Set[String] = {
+  def extractColumnsFromEvent(eventJson: Json): Set[String] = {
     val columnNames = mutable.Set[String]()
 
     eventJson.asObject.foreach { obj =>
@@ -66,29 +90,5 @@ trait EventStorage {
     }
 
     columnNames.toSet
-  }
-}
-
-object NoStorage extends EventStorage {
-  def addToGood(events: List[GoodEvent]): IO[Unit] = IO.unit
-  def addToBad(events: List[BadEvent]): IO[Unit] = IO.unit
-  def reset(): IO[Unit] = IO.unit
-  def getEvents: IO[List[Json]] = IO.pure(List.empty)
-  def getColumns: IO[List[String]] = IO.pure(List.empty)
-  def getTimeline: IO[TimelineData] = IO.pure(TimelineData(List.empty))
-}
-
-object EventStorage {
-  def create(config: MicroConfig): Resource[IO, EventStorage] = {
-    (config.storage, config.maxEvents) match {
-      case (_, Some(0)) =>
-        Resource.pure(NoStorage)
-      case (Some(storagePath), maxEvents) =>
-        SqliteStorage.file(storagePath.toString, maxEvents)
-      case (None, Some(maxEvents)) =>
-        SqliteStorage.inMemory(Some(maxEvents))
-      case (None, None) =>
-        Resource.pure(new InMemoryStorage())
-    }
   }
 }

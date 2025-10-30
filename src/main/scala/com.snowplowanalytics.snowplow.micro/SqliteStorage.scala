@@ -39,7 +39,7 @@ private[micro] class SqliteStorage(xa: Transactor[IO], maxEvents: Option[Int]) e
         (goodEvent.event.event_id.toString, Timestamp.from(goodEvent.event.collector_tstamp), eventJson.noSpaces, goodEvent.incomplete, appId, eventName)
       }
 
-      val allColumns = eventJsons.map(extractColumnsFromEvent)
+      val allColumns = eventJsons.map(EventStorage.extractColumnsFromEvent)
         .reduce(_.union(_)).toList
 
       val insertEventsProgram = {
@@ -130,7 +130,7 @@ private[micro] class SqliteStorage(xa: Transactor[IO], maxEvents: Option[Int]) e
       .to[List]
       .transact(xa)
       .map { sparsePoints =>
-        val filledPoints = fillMissingMinutes(sparsePoints)
+        val filledPoints = EventStorage.fillMissingMinutes(sparsePoints)
         TimelineData(filledPoints)
       }
   }

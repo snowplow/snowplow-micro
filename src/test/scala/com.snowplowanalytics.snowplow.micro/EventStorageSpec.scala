@@ -10,28 +10,14 @@
 
 package com.snowplowanalytics.snowplow.micro
 
-import cats.effect.IO
+import cats.effect.{IO, Resource}
+import cats.effect.unsafe.implicits.global
 import org.specs2.mutable.Specification
+import org.specs2.specification.core.Fragment
 import io.circe.Json
 import io.circe.parser.parse
 
 class EventStorageSpec extends Specification {
-
-  class TestEventStorage extends EventStorage {
-    def addToGood(events: List[GoodEvent]): IO[Unit] = IO.unit
-    def addToBad(events: List[BadEvent]): IO[Unit] = IO.unit
-    def reset(): IO[Unit] = IO.unit
-    def getEvents: IO[List[Json]] = IO.pure(List.empty)
-    def getColumns: IO[List[String]] = IO.pure(List.empty)
-    def getTimeline: IO[TimelineData] = IO.pure(TimelineData(List.empty))
-
-    def testExtractColumnsFromEvent(eventJson: Json): Set[String] = {
-      extractColumnsFromEvent(eventJson)
-    }
-  }
-
-  val testStorage = new TestEventStorage()
-
   "extractColumnsFromEvent" >> {
     "should extract top-level column names" >> {
       val json = parse("""
@@ -42,7 +28,7 @@ class EventStorageSpec extends Specification {
         }
       """).getOrElse(Json.Null)
 
-      val columns = testStorage.testExtractColumnsFromEvent(json)
+      val columns = EventStorage.extractColumnsFromEvent(json)
       columns must contain(exactly("event_id", "collector_tstamp", "app_id"))
     }
 
@@ -63,7 +49,7 @@ class EventStorageSpec extends Specification {
         }
       """).getOrElse(Json.Null)
 
-      val columns = testStorage.testExtractColumnsFromEvent(json)
+      val columns = EventStorage.extractColumnsFromEvent(json)
       columns must contain(allOf(
         "event_id",
         "contexts_com_example_schema_1",
@@ -85,7 +71,7 @@ class EventStorageSpec extends Specification {
         }
       """).getOrElse(Json.Null)
 
-      val columns = testStorage.testExtractColumnsFromEvent(json)
+      val columns = EventStorage.extractColumnsFromEvent(json)
       columns must contain(allOf(
         "event_id",
         "unstruct_event_com_example_action_1",
@@ -113,7 +99,7 @@ class EventStorageSpec extends Specification {
         }
       """).getOrElse(Json.Null)
 
-      val columns = testStorage.testExtractColumnsFromEvent(json)
+      val columns = EventStorage.extractColumnsFromEvent(json)
       columns must contain(allOf(
         "event_id",
         "collector_tstamp",
@@ -134,7 +120,7 @@ class EventStorageSpec extends Specification {
         }
       """).getOrElse(Json.Null)
 
-      val columns = testStorage.testExtractColumnsFromEvent(json)
+      val columns = EventStorage.extractColumnsFromEvent(json)
       columns must contain(exactly("event_id", "contexts_com_example_schema_1"))
     }
 
@@ -152,7 +138,7 @@ class EventStorageSpec extends Specification {
         }
       """).getOrElse(Json.Null)
 
-      val columns = testStorage.testExtractColumnsFromEvent(json)
+      val columns = EventStorage.extractColumnsFromEvent(json)
       columns must contain(allOf(
         "event_id",
         "nullable_field",
@@ -177,7 +163,7 @@ class EventStorageSpec extends Specification {
         }
       """).getOrElse(Json.Null)
 
-      val columns = testStorage.testExtractColumnsFromEvent(json)
+      val columns = EventStorage.extractColumnsFromEvent(json)
       columns must contain(allOf(
         "event_id",
         "some_object_field",
@@ -189,8 +175,98 @@ class EventStorageSpec extends Specification {
 
     "should return empty set for empty JSON object" >> {
       val json = parse("{}").getOrElse(Json.Null)
-      val columns = testStorage.testExtractColumnsFromEvent(json)
+      val columns = EventStorage.extractColumnsFromEvent(json)
       columns must be empty
+    }
+  }
+}
+
+trait EventStorageTimelineSpec {
+  self: Specification =>
+
+  import InMemoryStorageSpec._
+
+  def timelineTests(storageResource: Resource[IO, EventStorage], storageName: String): Fragment = {
+    s"$storageName getTimeline" >> {
+      "should return empty timeline for empty storage" >> {
+        storageResource.use { storage =>
+          storage.getTimeline.map { timeline =>
+            timeline.points must have size(31)
+            timeline.points.forall(p => p.validEvents == 0 && p.failedEvents == 0) must beTrue
+          }
+        }.unsafeRunSync()
+      }
+
+      "should return timeline with events grouped by minute" >> {
+        storageResource.use { storage =>
+          for {
+            _ <- storage.addToGood(List(GoodEvent3, GoodEvent2, GoodEvent1))
+            timeline <- storage.getTimeline
+          } yield {
+            timeline.points must have size(31)
+
+            val pointsWithEvents = timeline.points.filter(p => p.validEvents > 0 || p.failedEvents > 0)
+            pointsWithEvents must have size(2) // GoodEvent1 & GoodEvent2 in same minute, GoodEvent3 in different minute
+
+            val eventMinute12 = EventStorage.roundToMinute(GoodEvent1.event.collector_tstamp.toEpochMilli)
+            val eventMinute3 = EventStorage.roundToMinute(GoodEvent3.event.collector_tstamp.toEpochMilli)
+
+            val minute12Point = pointsWithEvents.find(_.timestamp == eventMinute12)
+            val minute3Point = pointsWithEvents.find(_.timestamp == eventMinute3)
+
+            minute12Point must beSome
+            minute3Point must beSome
+
+            minute12Point.get.validEvents must_== 2
+            minute12Point.get.failedEvents must_== 0
+
+            minute3Point.get.validEvents must_== 1
+            minute3Point.get.failedEvents must_== 0
+          }
+        }.unsafeRunSync()
+      }
+
+      "should return timeline with failed events when incomplete" >> {
+        val failedEvent = GoodEvent3.copy(incomplete = true)
+        storageResource.use { storage =>
+          for {
+            _ <- storage.addToGood(List(failedEvent, GoodEvent2, GoodEvent1))
+            timeline <- storage.getTimeline
+          } yield {
+            timeline.points must have size(31)
+
+            val pointsWithEvents = timeline.points.filter(p => p.validEvents > 0 || p.failedEvents > 0)
+            pointsWithEvents must have size(2)
+
+            val eventMinute12 = EventStorage.roundToMinute(GoodEvent1.event.collector_tstamp.toEpochMilli)
+            val eventMinute3 = EventStorage.roundToMinute(failedEvent.event.collector_tstamp.toEpochMilli)
+
+            val minute12Point = pointsWithEvents.find(_.timestamp == eventMinute12)
+            val minute3Point = pointsWithEvents.find(_.timestamp == eventMinute3)
+
+            minute12Point must beSome
+            minute3Point must beSome
+
+            minute12Point.get.validEvents must_== 2
+            minute12Point.get.failedEvents must_== 0
+
+            minute3Point.get.validEvents must_== 0
+            minute3Point.get.failedEvents must_== 1
+          }
+        }.unsafeRunSync()
+      }
+
+      "should return timeline ordered by timestamp descending" >> {
+        storageResource.use { storage =>
+          for {
+            _ <- storage.addToGood(List(GoodEvent1, GoodEvent2, GoodEvent3))
+            timeline <- storage.getTimeline
+          } yield {
+            timeline.points must have size(31)
+            timeline.points.map(_.timestamp) must beSorted(Ordering.Long.reverse)
+          }
+        }.unsafeRunSync()
+      }
     }
   }
 }
