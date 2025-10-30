@@ -87,6 +87,19 @@ private[micro] class InMemoryStorage extends EventStorage {
     }
   }
 
+  def getTimeline: IO[TimelineData] = IO.delay {
+    val groupedByMinute = LockGood.synchronized {
+      good.groupBy(event => roundToMinute(event.event.collector_tstamp.toEpochMilli))
+        .map {
+          case (minute, events) =>
+            val (failed, valid) = events.partition(_.incomplete)
+            TimelinePoint(valid.size, failed.size, minute)
+        }.toList
+    }
+    val filledPoints = fillMissingMinutes(groupedByMinute)
+    TimelineData(filledPoints)
+  }
+
   /** Filter out the bad events with the possible filters contained in the HTTP request. */
   def filterBad(
     filtersBad: FiltersBad = FiltersBad(None, None, None)

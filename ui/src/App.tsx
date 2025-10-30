@@ -3,7 +3,7 @@ import { DataTable } from '@/components/DataTable'
 import { ColumnSelector } from '@/components/ColumnSelector'
 import { JsonSidePanel } from '@/components/JsonSidePanel'
 import { EventsChart } from '@/components/EventsChart'
-import { type Event, EventsApiService } from '@/services/api'
+import { type Event, type TimelineData, EventsApiService } from '@/services/api'
 import { useColumnManager } from '@/hooks/useColumnManager'
 import { Button } from '@/components/ui/button'
 import {
@@ -18,6 +18,8 @@ import { roundToMinute } from '@/utils/event-utils'
 
 function App() {
   const [events, setEvents] = useState<Event[]>([])
+  const [timelineData, setTimelineData] = useState<TimelineData>({ points: [] })
+  const [availableColumnNames, setAvailableColumnNames] = useState<string[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [showColumnSelector, setShowColumnSelector] = useState(false)
   const [selectedCellId, setSelectedCellId] = useState<string | null>(null)
@@ -46,8 +48,8 @@ function App() {
     }, 100)
   }
 
-  const { availableColumns, selectedColumns, toggleColumn, reorderColumns, resetToDefaults, refreshColumns } =
-    useColumnManager({ setColumnFilters, onColumnAdded: scrollToLastColumn })
+  const { availableColumns, selectedColumns, toggleColumn, reorderColumns, resetToDefaults } =
+    useColumnManager({ availableColumnNames, setColumnFilters, onColumnAdded: scrollToLastColumn })
 
   // Filter events based on selected minute
   const filteredEvents = events.filter((event) => {
@@ -67,10 +69,15 @@ function App() {
     setIsLoading(true)
 
     try {
-      const fetchedEvents = await EventsApiService.fetchEvents()
+      const [fetchedEvents, fetchedTimeline, fetchedColumns] = await Promise.all([
+        EventsApiService.fetchEvents(),
+        EventsApiService.fetchTimeline(),
+        EventsApiService.fetchColumns(),
+      ])
       setEvents(fetchedEvents)
+      setTimelineData(fetchedTimeline)
+      setAvailableColumnNames(fetchedColumns)
       setLastRefreshTime(new Date())
-      await refreshColumns()
     } catch (err) {
       console.error('Failed to fetch events:', err)
     } finally {
@@ -88,9 +95,9 @@ function App() {
     try {
       await EventsApiService.resetEvents()
       setEvents([])
+      setTimelineData({ points: [] })
+      setAvailableColumnNames([])
       setSelectedMinute(null)
-      // columns will also have been reset
-      await refreshColumns()
     } catch (err) {
       console.error('Failed to reset events:', err)
     } finally {
@@ -278,7 +285,7 @@ function App() {
         <div className="h-full p-4 min-w-0 flex flex-1 flex-col gap-4">
           {/* Events Chart */}
           <EventsChart
-            events={events}
+            timelineData={timelineData}
             selectedMinute={selectedMinute}
             onMinuteClick={setSelectedMinute}
           />

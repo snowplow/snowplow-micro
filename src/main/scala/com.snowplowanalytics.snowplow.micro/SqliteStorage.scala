@@ -101,6 +101,39 @@ private[micro] class SqliteStorage(xa: Transactor[IO], maxEvents: Option[Int]) e
       .to[List]
       .transact(xa)
   }
+
+  def getTimeline: IO[TimelineData] = {
+    val query = sql"""
+      WITH latest_event AS (
+        SELECT COALESCE(MAX(timestamp), ${System.currentTimeMillis()}) as max_timestamp FROM events
+      ),
+      time_range AS (
+        SELECT
+          (max_timestamp / 60000) * 60000 as latest_minute,
+          (max_timestamp / 60000) * 60000 - 30 * 60000 as start_minute
+        FROM latest_event
+      ),
+      sparse_data AS (
+        SELECT
+          (timestamp / 60000) * 60000 as minute,
+          COUNT(CASE WHEN NOT failed THEN 1 END) as valid_count,
+          COUNT(CASE WHEN failed THEN 1 END) as failed_count
+        FROM events, time_range
+        WHERE timestamp >= time_range.start_minute AND timestamp < (time_range.latest_minute + 60000)
+        GROUP BY minute
+      )
+      SELECT minute, valid_count, failed_count FROM sparse_data ORDER BY minute DESC
+    """
+
+    query
+      .query[TimelinePoint]
+      .to[List]
+      .transact(xa)
+      .map { sparsePoints =>
+        val filledPoints = fillMissingMinutes(sparsePoints)
+        TimelineData(filledPoints)
+      }
+  }
 }
 
 private[micro] object SqliteStorage {
@@ -173,4 +206,9 @@ private[micro] object SqliteStorage {
         )
       """.update.run.void
   }
+
+  implicit val timelinePointRead: Read[TimelinePoint] =
+    Read[(Long, Int, Int)].map { case (timestamp, validEvents, failedEvents) =>
+      TimelinePoint(validEvents, failedEvents, timestamp)
+    }
 }

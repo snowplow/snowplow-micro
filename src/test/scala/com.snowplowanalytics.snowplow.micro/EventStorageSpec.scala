@@ -23,6 +23,7 @@ class EventStorageSpec extends Specification {
     def reset(): IO[Unit] = IO.unit
     def getEvents: IO[List[Json]] = IO.pure(List.empty)
     def getColumns: IO[List[String]] = IO.pure(List.empty)
+    def getTimeline: IO[TimelineData] = IO.pure(TimelineData(List.empty))
 
     def testExtractColumnsFromEvent(eventJson: Json): Set[String] = {
       extractColumnsFromEvent(eventJson)

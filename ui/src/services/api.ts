@@ -3,6 +3,16 @@ export type Event = {
   [key: string]: any
 }
 
+export type TimelinePoint = {
+  validEvents: number
+  failedEvents: number
+  timestamp: number
+}
+
+export type TimelineData = {
+  points: TimelinePoint[]
+}
+
 export class EventsApiService {
   /**
    * Fetch events from the snowplow-micro backend
@@ -58,5 +68,26 @@ export class EventsApiService {
 
     const data = await response.json()
     return data as string[]
+  }
+
+  /**
+   * Fetch timeline data from the backend
+   */
+  static async fetchTimeline(): Promise<TimelineData> {
+    const url = new URL('/micro/timeline', window.location.origin)
+
+    const response = await fetch(url.toString(), {
+      method: 'GET',
+      headers: {
+        Accept: 'application/json',
+      },
+    })
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+    }
+
+    const data = await response.json()
+    return data as TimelineData
   }
 }

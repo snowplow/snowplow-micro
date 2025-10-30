@@ -15,12 +15,31 @@ import com.snowplowanalytics.snowplow.micro.Configuration.MicroConfig
 import io.circe.Json
 import scala.collection.mutable
 
+case class TimelinePoint(validEvents: Int, failedEvents: Int, timestamp: Long)
+case class TimelineData(points: List[TimelinePoint])
+
 trait EventStorage {
   def addToGood(events: List[GoodEvent]): IO[Unit]
   def addToBad(events: List[BadEvent]): IO[Unit]
   def reset(): IO[Unit]
   def getEvents: IO[List[Json]]
   def getColumns: IO[List[String]]
+  def getTimeline: IO[TimelineData]
+
+  protected def roundToMinute(timestamp: Long): Long = {
+    (timestamp / 60000) * 60000
+  }
+
+  protected def fillMissingMinutes(points: List[TimelinePoint]): List[TimelinePoint] = {
+    // the first point is the latest one
+    val latestTime = points.headOption.fold(roundToMinute(System.currentTimeMillis()))(_.timestamp)
+    val startTime = latestTime - 30 * 60000
+    val pointMap = points.map(p => p.timestamp -> p).toMap
+
+    (latestTime to startTime by -60000).toList.map { minute =>
+      pointMap.getOrElse(minute, TimelinePoint(0, 0, minute))
+    }
+  }
 
   protected def extractColumnsFromEvent(eventJson: Json): Set[String] = {
     val columnNames = mutable.Set[String]()
@@ -56,6 +75,7 @@ object NoStorage extends EventStorage {
   def reset(): IO[Unit] = IO.unit
   def getEvents: IO[List[Json]] = IO.pure(List.empty)
   def getColumns: IO[List[String]] = IO.pure(List.empty)
+  def getTimeline: IO[TimelineData] = IO.pure(TimelineData(List.empty))
 }
 
 object EventStorage {

@@ -5,20 +5,12 @@ import {
   ChartContainer,
   ChartTooltip,
 } from '@/components/ui/chart'
-import { type Event } from '@/services/api'
-import { hasFailureData, roundToMinute } from '@/utils/event-utils'
+import { type TimelineData } from '@/services/api'
 
 interface EventsChartProps {
-  events: Event[]
+  timelineData: TimelineData
   selectedMinute: string | null
   onMinuteClick: (minute: string | null) => void
-}
-
-type ChartData = {
-  minute: string
-  validEvents: number
-  failedEvents: number
-  timestamp: number
 }
 
 const chartConfig = {
@@ -33,74 +25,24 @@ const chartConfig = {
 } satisfies ChartConfig
 
 export function EventsChart({
-  events,
+  timelineData,
   selectedMinute,
   onMinuteClick,
 }: EventsChartProps) {
   const [barHovered, setBarHovered] = useState(false)
 
   const chartData = useMemo(() => {
-    // Group events by minute
-    const minuteGroups = new Map<
-      string,
-      { valid: number; failed: number; timestamp: number }
-    >()
-
-    events.forEach((event) => {
-      if (!event.collector_tstamp) return
-
-      const timestamp = new Date(event.collector_tstamp).getTime()
-      const roundedTimestamp = roundToMinute(timestamp)
-      const minuteKey = new Date(roundedTimestamp).toISOString()
-
-      const hasFailures = hasFailureData(event)
-
-      if (!minuteGroups.has(minuteKey)) {
-        minuteGroups.set(minuteKey, {
-          valid: 0,
-          failed: 0,
-          timestamp: roundedTimestamp,
-        })
-      }
-
-      const group = minuteGroups.get(minuteKey)!
-      if (hasFailures) {
-        group.failed++
-      } else {
-        group.valid++
-      }
-    })
-
-    // Create array with last 30 minutes from the latest event, filling gaps with zero
-    const latestEventTime = events.length > 0
-      ? Math.max(...events.map(event =>
-          event.collector_tstamp ? new Date(event.collector_tstamp).getTime() : 0
-        ))
-      : Date.now()
-
-    const endTime = roundToMinute(latestEventTime)
-    const startTime = endTime - 30 * 60 * 1000
-    const data: ChartData[] = []
-
-    for (let time = startTime; time <= endTime; time += 60000) {
-      const roundedTime = roundToMinute(time)
-      const minuteKey = new Date(roundedTime).toISOString()
-      const group = minuteGroups.get(minuteKey)
-
-      data.push({
-        minute: new Date(roundedTime).toLocaleTimeString('en-US', {
-          hour12: false,
-          hour: '2-digit',
-          minute: '2-digit',
-        }),
-        validEvents: group?.valid || 0,
-        failedEvents: group?.failed || 0,
-        timestamp: roundedTime,
-      })
-    }
-
-    return data
-  }, [events])
+    return timelineData.points.map(point => ({
+      minute: new Date(point.timestamp).toLocaleTimeString('en-US', {
+        hour12: false,
+        hour: '2-digit',
+        minute: '2-digit',
+      }),
+      validEvents: point.validEvents,
+      failedEvents: point.failedEvents,
+      timestamp: point.timestamp,
+    }))
+  }, [timelineData])
 
   const handleChartClick = (event: any) => {
     if (event && event.activePayload && event.activePayload.length > 0) {

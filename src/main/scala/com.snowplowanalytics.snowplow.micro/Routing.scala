@@ -43,6 +43,8 @@ sealed trait MicroRoutes[S <: EventStorage] extends Http4sDsl[IO] {
       storage.getEvents.flatMap(events => Ok(events))
     case GET -> Root / "micro" / "columns" =>
       storage.getColumns.flatMap(columns => Ok(columns))
+    case GET -> Root / "micro" / "timeline" =>
+      storage.getTimeline.flatMap(timeline => Ok(timeline))
     case GET -> Root / "micro" / "iglu" / vendor / name / "jsonschema" / versionVar =>
       lookupSchema(vendor, name, versionVar)
     case GET -> "micro" /: path if path.startsWithString("ui") =>
@@ -94,7 +96,7 @@ final class InMemoryRoutes(protected val igluResolver: Resolver[IO], protected v
         Ok(storage.filterBad(filters))
       }
     case _ -> "micro" /: _ =>
-      NotFound("Supported endpoints: /micro/events, /micro/columns, /micro/all, /micro/good, /micro/bad, /micro/reset, /micro/iglu, /micro/ui")
+      NotFound("Supported endpoints: /micro/events, /micro/columns, /micro/timeline, /micro/all, /micro/good, /micro/bad, /micro/reset, /micro/iglu, /micro/ui")
   }
 
   val routes: HttpRoutes[IO] = commonRoutes <+> inMemoryRoutes
@@ -105,7 +107,7 @@ final class SqliteRoutes(protected val igluResolver: Resolver[IO],
                         (implicit protected val lookup: RegistryLookup[IO]) extends MicroRoutes[SqliteStorage] {
   private val sqliteRoutes: HttpRoutes[IO] = HttpRoutes.of[IO] {
     case _ -> "micro" /: _ =>
-      NotFound("Supported endpoints: /micro/events, /micro/columns, /micro/reset, /micro/iglu, /micro/ui")
+      NotFound("Supported endpoints: /micro/events, /micro/columns, /micro/timeline, /micro/reset, /micro/iglu, /micro/ui")
   }
 
   val routes: HttpRoutes[IO] = commonRoutes <+> sqliteRoutes
@@ -144,6 +146,8 @@ object Routing {
   implicit val e: Encoder[Event] = deriveEncoder
   implicit val be: Encoder[BadEvent] = deriveEncoder
   implicit val re: Encoder[ResolutionError] = deriveEncoder
+  implicit val tp: Encoder[TimelinePoint] = deriveEncoder
+  implicit val td: Encoder[TimelineData] = deriveEncoder
 
   implicit val fg: Decoder[FiltersGood] = deriveDecoder
   implicit val fb: Decoder[FiltersBad] = deriveDecoder
