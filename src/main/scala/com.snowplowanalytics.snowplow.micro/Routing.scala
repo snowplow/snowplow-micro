@@ -39,6 +39,10 @@ sealed trait MicroRoutes[S <: EventStorage] extends Http4sDsl[IO] {
   def commonRoutes: HttpRoutes[IO] = HttpRoutes.of[IO] {
     case (POST | GET) -> Root / "micro" / "reset" =>
       storage.reset().flatMap(_ => Ok("Reset completed"))
+    case GET -> Root / "micro" / "events" =>
+      storage.getEvents.flatMap(events => Ok(events))
+    case GET -> Root / "micro" / "columns" =>
+      storage.getColumns.flatMap(columns => Ok(columns))
     case GET -> Root / "micro" / "iglu" / vendor / name / "jsonschema" / versionVar =>
       lookupSchema(vendor, name, versionVar)
     case GET -> "micro" /: path if path.startsWithString("ui") =>
@@ -75,8 +79,6 @@ sealed trait MicroRoutes[S <: EventStorage] extends Http4sDsl[IO] {
 final class InMemoryRoutes(protected val igluResolver: Resolver[IO], protected val storage: InMemoryStorage)
                           (implicit protected val lookup: RegistryLookup[IO]) extends MicroRoutes[InMemoryStorage] {
   private val inMemoryRoutes: HttpRoutes[IO] = HttpRoutes.of[IO] {
-    case GET -> Root / "micro" / "events" =>
-      Ok(storage.getGoodAndIncomplete.map(_.event.toJson(lossy = true)))
     case (POST | GET) -> Root / "micro" / "all" =>
       Ok(storage.getSummary())
     case GET -> Root / "micro" / "good" =>
@@ -92,7 +94,7 @@ final class InMemoryRoutes(protected val igluResolver: Resolver[IO], protected v
         Ok(storage.filterBad(filters))
       }
     case _ -> "micro" /: _ =>
-      NotFound("Supported endpoints: /micro/events, /micro/all, /micro/good, /micro/bad, /micro/reset, /micro/iglu, /micro/ui")
+      NotFound("Supported endpoints: /micro/events, /micro/columns, /micro/all, /micro/good, /micro/bad, /micro/reset, /micro/iglu, /micro/ui")
   }
 
   val routes: HttpRoutes[IO] = commonRoutes <+> inMemoryRoutes
@@ -102,10 +104,8 @@ final class SqliteRoutes(protected val igluResolver: Resolver[IO],
                          protected val storage: SqliteStorage)
                         (implicit protected val lookup: RegistryLookup[IO]) extends MicroRoutes[SqliteStorage] {
   private val sqliteRoutes: HttpRoutes[IO] = HttpRoutes.of[IO] {
-    case GET -> Root / "micro" / "events" =>
-      storage.getEvents.flatMap(events => Ok(events))
     case _ -> "micro" /: _ =>
-      NotFound("Supported endpoints: /micro/events, /micro/reset, /micro/iglu, /micro/ui")
+      NotFound("Supported endpoints: /micro/events, /micro/columns, /micro/reset, /micro/iglu, /micro/ui")
   }
 
   val routes: HttpRoutes[IO] = commonRoutes <+> sqliteRoutes

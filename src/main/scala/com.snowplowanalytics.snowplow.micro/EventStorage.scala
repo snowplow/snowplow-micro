@@ -12,17 +12,50 @@ package com.snowplowanalytics.snowplow.micro
 
 import cats.effect.{IO, Resource}
 import com.snowplowanalytics.snowplow.micro.Configuration.MicroConfig
+import io.circe.Json
+import scala.collection.mutable
 
 trait EventStorage {
   def addToGood(events: List[GoodEvent]): IO[Unit]
   def addToBad(events: List[BadEvent]): IO[Unit]
   def reset(): IO[Unit]
+  def getEvents: IO[List[Json]]
+  def getColumns: IO[List[String]]
+
+  protected def extractColumnsFromEvent(eventJson: Json): Set[String] = {
+    val columnNames = mutable.Set[String]()
+
+    eventJson.asObject.foreach { obj =>
+      columnNames ++= obj.keys
+
+      obj.toIterable.foreach { case (fieldName, value) =>
+        if (fieldName.startsWith("contexts_")) {
+          value.asArray.foreach { arr =>
+            arr.foreach { item =>
+              item.asObject.foreach { obj =>
+                columnNames ++= obj.keys.map(key => s"$fieldName.$key")
+              }
+            }
+          }
+        }
+        else if (fieldName.startsWith("unstruct_event_")) {
+          value.asObject.foreach { obj =>
+            columnNames ++= obj.keys.map(key => s"$fieldName.$key")
+          }
+        }
+      }
+    }
+
+    columnNames.toSet
+  }
 }
 
 object NoStorage extends EventStorage {
   def addToGood(events: List[GoodEvent]): IO[Unit] = IO.unit
   def addToBad(events: List[BadEvent]): IO[Unit] = IO.unit
   def reset(): IO[Unit] = IO.unit
+  def getEvents: IO[List[Json]] = IO.pure(List.empty)
+  def getColumns: IO[List[String]] = IO.pure(List.empty)
 }
 
 object EventStorage {

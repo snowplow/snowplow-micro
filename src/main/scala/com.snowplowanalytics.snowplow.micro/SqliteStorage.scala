@@ -39,9 +39,19 @@ private[micro] class SqliteStorage(xa: Transactor[IO], maxEvents: Option[Int]) e
         (goodEvent.event.event_id.toString, Timestamp.from(goodEvent.event.collector_tstamp), eventJson.noSpaces, goodEvent.incomplete, appId, eventName)
       }
 
+      val allColumns = eventJsons.map(extractColumnsFromEvent)
+        .reduce(_.union(_)).toList
+
       val insertEventsProgram = {
         val sql = "INSERT OR IGNORE INTO events (event_id, timestamp, event_json, failed, app_id, event_name) VALUES (?, ?, ?, ?, ?, ?)"
         Update[(String, Timestamp, String, Boolean, Option[String], Option[String])](sql).updateMany(eventData)
+      }
+
+      val insertColumnsProgram = if (allColumns.nonEmpty) {
+        val sql = "INSERT OR IGNORE INTO columns (name) VALUES (?)"
+        Update[String](sql).updateMany(allColumns)
+      } else {
+        ().pure[ConnectionIO]
       }
 
       val cleanupProgram = maxEvents.fold(().pure[ConnectionIO]) { limit =>
@@ -53,7 +63,7 @@ private[micro] class SqliteStorage(xa: Transactor[IO], maxEvents: Option[Int]) e
         }
       }
 
-      (insertEventsProgram *> cleanupProgram).transact(xa)
+      (insertEventsProgram *> insertColumnsProgram *> cleanupProgram).transact(xa).void
     } else {
       IO.unit
     }
@@ -63,8 +73,8 @@ private[micro] class SqliteStorage(xa: Transactor[IO], maxEvents: Option[Int]) e
   override def addToBad(events: List[BadEvent]): IO[Unit] = IO.unit
 
   /** Reset storage by deleting all events. */
-  override def reset(): IO[Unit] = {
-    sql"DELETE FROM events".update.run.transact(xa).void
+  def reset(): IO[Unit] = {
+    (sql"DELETE FROM events".update.run *> sql"DELETE FROM columns".update.run).transact(xa).void
   }
 
   /** Get all events as JSON for the /micro/events endpoint. */
@@ -85,7 +95,12 @@ private[micro] class SqliteStorage(xa: Transactor[IO], maxEvents: Option[Int]) e
       }
   }
 
-
+  def getColumns: IO[List[String]] = {
+    sql"SELECT name FROM columns ORDER BY name"
+      .query[String]
+      .to[List]
+      .transact(xa)
+  }
 }
 
 private[micro] object SqliteStorage {
@@ -118,7 +133,8 @@ private[micro] object SqliteStorage {
     } yield new SqliteStorage(xa, maxEvents)
   }
 
-  private def initialize(xa: Transactor[IO]): IO[Unit] = createEventsTable.transact(xa)
+  private def initialize(xa: Transactor[IO]): IO[Unit] =
+    (createEventsTable *> createColumnsTable).transact(xa)
 
   private def createEventsTable: ConnectionIO[Unit] = {
     sql"""
@@ -135,6 +151,15 @@ private[micro] object SqliteStorage {
       sql"CREATE INDEX IF NOT EXISTS idx_events_app_id ON events(app_id)".update.run.void *>
       sql"CREATE INDEX IF NOT EXISTS idx_events_event_name ON events(event_name)".update.run.void *>
       sql"CREATE INDEX IF NOT EXISTS idx_events_failed ON events(failed)".update.run.void
+  }
+
+  private def createColumnsTable: ConnectionIO[Unit] = {
+    sql"""
+      CREATE TABLE IF NOT EXISTS columns (
+        name TEXT PRIMARY KEY
+      )
+    """.update.run.void *>
+      sql"CREATE INDEX IF NOT EXISTS idx_columns_name ON columns(name)".update.run.void
   }
 
   private def cleanupOldEvents(limit: Int): ConnectionIO[Unit] = {

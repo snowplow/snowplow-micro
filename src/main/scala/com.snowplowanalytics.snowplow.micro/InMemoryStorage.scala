@@ -11,6 +11,7 @@
 package com.snowplowanalytics.snowplow.micro
 
 import cats.effect.IO
+import io.circe.Json
 
 /** In-memory cache containing the results of the validation (or not) of the tracking events.
   * Good events are stored with their type, their schema and their contexts, if any,
@@ -72,6 +73,19 @@ private[micro] class InMemoryStorage extends EventStorage {
   /** Get all good + incomplete events */
   def getGoodAndIncomplete: List[GoodEvent] =
     LockGood.synchronized(good)
+
+  def getEvents: IO[List[Json]] = IO.delay {
+    getGoodAndIncomplete.map(_.event.toJson(lossy = true))
+  }
+
+  def getColumns: IO[List[String]] = {
+    getEvents.map { jsonEvents =>
+      jsonEvents.map(extractColumnsFromEvent)
+        .fold(Set.empty[String])(_.union(_))
+        .toList
+        .sorted
+    }
+  }
 
   /** Filter out the bad events with the possible filters contained in the HTTP request. */
   def filterBad(
