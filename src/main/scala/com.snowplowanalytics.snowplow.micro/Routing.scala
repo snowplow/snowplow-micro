@@ -41,6 +41,10 @@ sealed trait MicroRoutes[S <: EventStorage] extends Http4sDsl[IO] {
       storage.reset().flatMap(_ => Ok("Reset completed"))
     case GET -> Root / "micro" / "events" =>
       storage.getEvents.flatMap(events => Ok(events))
+    case request @ POST -> Root / "micro" / "events" =>
+      request.as[EventsRequest].flatMap { req =>
+        storage.getFilteredEvents(req).flatMap(response => Ok(response))
+      }
     case GET -> Root / "micro" / "columns" =>
       storage.getColumns.flatMap(columns => Ok(columns))
     case GET -> Root / "micro" / "timeline" =>
@@ -153,8 +157,16 @@ object Routing {
   implicit val tp: Encoder[TimelinePoint] = deriveEncoder
   implicit val td: Encoder[TimelineData] = deriveEncoder
   implicit val cs: Encoder[ColumnStats] = deriveEncoder
+  implicit val ef: Encoder[EventsFilter] = deriveEncoder
+  implicit val tr: Encoder[TimeRange] = deriveEncoder
+  implicit val es: Encoder[EventsSorting] = deriveEncoder
+  implicit val er: Encoder[EventsResponse] = deriveEncoder
 
   implicit val fg: Decoder[FiltersGood] = deriveDecoder
   implicit val fb: Decoder[FiltersBad] = deriveDecoder
   implicit val csr: Decoder[ColumnStatsRequest] = deriveDecoder
+  implicit val efd: Decoder[EventsFilter] = deriveDecoder
+  implicit val trd: Decoder[TimeRange] = deriveDecoder
+  implicit val esd: Decoder[EventsSorting] = deriveDecoder
+  implicit val erd: Decoder[EventsRequest] = deriveDecoder
 }

@@ -21,7 +21,7 @@ import com.snowplowanalytics.snowplow.analytics.scalasdk.Event
 import java.util.UUID
 import java.time.Instant
 
-class InMemoryStorageSpec extends Specification with EventStorageTimelineSpec with EventStorageColumnStatsSpec {
+class InMemoryStorageSpec extends Specification with EventStorageTimelineSpec with EventStorageColumnStatsSpec with EventStorageFilteredEventsSpec {
   import InMemoryStorageSpec._
 
   "getSummary" >> {
@@ -299,6 +299,7 @@ class InMemoryStorageSpec extends Specification with EventStorageTimelineSpec wi
 
   timelineTests(Resource.eval(IO(emptyCache())), "InMemoryStorage")
   columnStatsTests(Resource.eval(IO(emptyCache())), "InMemoryStorage")
+  filteredEventsTests(Resource.eval(IO(emptyCache())), "InMemoryStorage")
 }
 
 object InMemoryStorageSpec {

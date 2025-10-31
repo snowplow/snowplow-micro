@@ -2,9 +2,6 @@ import React, { useMemo, useState, useEffect } from 'react'
 import {
   useReactTable,
   getCoreRowModel,
-  getPaginationRowModel,
-  getSortedRowModel,
-  getFilteredRowModel,
   flexRender,
 } from '@tanstack/react-table'
 import type {
@@ -28,7 +25,11 @@ import { Input } from '@/components/ui/input'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 
-import { generateColumns, type EventColumnDef, type EventColumnMeta } from '@/utils/column-generation'
+import {
+  generateColumns,
+  type EventColumnDef,
+  type EventColumnMeta,
+} from '@/utils/column-generation'
 import type { Event, ColumnStats } from '@/services/api'
 import { type ColumnMetadata } from '@/utils/column-metadata'
 import { ColumnAutocomplete } from '@/components/ColumnAutocomplete'
@@ -46,6 +47,12 @@ type DataTableProps = {
   onReorderColumns: (fromIndex: number, toIndex: number) => void
   onRowClick: (rowId: string, event: Event) => void
   columnStats?: Record<string, ColumnStats>
+  currentPage: number
+  totalPages: number
+  totalItems: number
+  onPageChange: (page: number) => void
+  sorting: SortingState
+  onSortingChange: (sorting: SortingState) => void
 }
 
 export function DataTable({
@@ -60,17 +67,13 @@ export function DataTable({
   onReorderColumns,
   onRowClick,
   columnStats,
+  currentPage,
+  totalPages,
+  totalItems,
+  onPageChange,
+  sorting,
+  onSortingChange,
 }: DataTableProps) {
-  const [sorting, setSorting] = useState<SortingState>([])
-  const [initialSortSet, setInitialSortSet] = useState(false)
-
-  // Set initial sorting when collector_tstamp is available
-  useEffect(() => {
-    if (!initialSortSet && selectedColumns.some(col => col.name === 'collector_tstamp')) {
-      setSorting([{ id: 'collector_tstamp', desc: true }])
-      setInitialSortSet(true)
-    }
-  }, [selectedColumns, initialSortSet])
 
   // Events are already in the correct format for react-table
 
@@ -83,34 +86,37 @@ export function DataTable({
       onReorderColumns,
       columnStats
     )
-  }, [selectedColumns, events, selectedCellId, onJsonCellToggle, onReorderColumns, columnStats])
+  }, [
+    selectedColumns,
+    events,
+    selectedCellId,
+    onJsonCellToggle,
+    onReorderColumns,
+    columnStats,
+  ])
 
   const table = useReactTable({
     data: events,
     columns,
     getCoreRowModel: getCoreRowModel(),
-    getPaginationRowModel: getPaginationRowModel(),
-    getSortedRowModel: getSortedRowModel(),
-    getFilteredRowModel: getFilteredRowModel(),
-    onSortingChange: setSorting,
+    onSortingChange,
     onColumnFiltersChange: setColumnFilters,
     state: {
       sorting,
       columnFilters,
     },
-    initialState: {
-      pagination: {
-        pageSize: 50,
-      },
-    },
+    manualPagination: true,
+    manualFiltering: true,
+    manualSorting: true,
   })
 
-  const totalRows = table.getFilteredRowModel().rows.length
-  const currentPageRows = table.getRowModel().rows.length
-  const pageIndex = table.getState().pagination.pageIndex
-  const pageSize = table.getState().pagination.pageSize
-  const startRow = pageIndex * pageSize + 1
-  const endRow = Math.min((pageIndex + 1) * pageSize, totalRows)
+  const currentPageRows = events.length
+  const pageSize = 50
+  const startRow = currentPageRows > 0 ? (currentPage - 1) * pageSize + 1 : 0
+  const endRow =
+    currentPageRows > 0
+      ? Math.min((currentPage - 1) * pageSize + currentPageRows, totalItems)
+      : 0
 
   return (
     <TooltipProvider delayDuration={300}>
@@ -138,30 +144,47 @@ export function DataTable({
                     <TableRow key={`${headerGroup.id}-filters`}>
                       {headerGroup.headers.map((header) => (
                         <TableHead key={`${header.id}-filter`} className="p-2">
-                          {(header.column.columnDef.meta as EventColumnMeta)?.eventStatusFilter ? (
+                          {(header.column.columnDef.meta as EventColumnMeta)
+                            ?.eventStatusFilter ? (
                             <StatusDropdown
-                              value={(header.column.getFilterValue() as 'valid' | 'failed') ?? 'all'}
+                              value={
+                                (header.column.getFilterValue() as
+                                  | 'valid'
+                                  | 'failed') ?? 'all'
+                              }
                               onChange={(value) => {
-                                header.column.setFilterValue(value === 'all' ? undefined : value)
+                                header.column.setFilterValue(
+                                  value === 'all' ? undefined : value
+                                )
                               }}
                             />
                           ) : header.column.getCanFilter() ? (
-                            (header.column.columnDef.meta as EventColumnMeta)?.useAutocomplete ? (
+                            (header.column.columnDef.meta as EventColumnMeta)
+                              ?.useAutocomplete ? (
                               <ColumnAutocomplete
-                                value={(header.column.getFilterValue() as string) ?? ''}
+                                value={
+                                  (header.column.getFilterValue() as string) ??
+                                  ''
+                                }
                                 onChange={(value) => {
                                   header.column.setFilterValue(
                                     value === '' ? undefined : value
                                   )
                                 }}
-                                options={(header.column.columnDef.meta as EventColumnMeta)?.distinctValues || []}
+                                options={
+                                  (
+                                    header.column.columnDef
+                                      .meta as EventColumnMeta
+                                  )?.distinctValues || []
+                                }
                                 placeholder="Filter..."
                               />
                             ) : (
                               <Input
                                 placeholder="Filter..."
                                 value={
-                                  (header.column.getFilterValue() as string) ?? ''
+                                  (header.column.getFilterValue() as string) ??
+                                  ''
                                 }
                                 onChange={(e) => {
                                   const value = e.target.value
@@ -222,11 +245,11 @@ export function DataTable({
                         const hasSelectedMinute = selectedMinute !== null
 
                         if (hasColumnFilters && hasSelectedMinute) {
-                          return "No events matching filters and selected time"
+                          return 'No events matching filters and selected time'
                         } else if (hasColumnFilters) {
-                          return "No events matching filters"
+                          return 'No events matching filters'
                         } else {
-                          return "No events"
+                          return 'No events'
                         }
                       })()}
                     </TableCell>
@@ -237,43 +260,43 @@ export function DataTable({
           </div>
 
           {/* Footer with row count and pagination - single line */}
-          {totalRows > 0 && (<div className="mt-4 flex items-center justify-between flex-shrink-0">
-            {/* Row count on the left */}
-            <div className="text-xs text-pagination font-light">
-              {totalRows === events.length
-                ? `Showing ${startRow}-${endRow} of ${totalRows} events`
-                : `Showing ${startRow}-${endRow} of ${totalRows} events (filtered from ${events.length} total)`}
-            </div>
-
-            {/* Pagination on the right */}
-            {totalRows > pageSize && (
-              <div className="flex items-center space-x-4">
-                <div className="text-xs text-pagination font-light">
-                  Page {pageIndex + 1} of {table.getPageCount()}
-                </div>
-                <div className="flex items-center space-x-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => table.previousPage()}
-                    disabled={!table.getCanPreviousPage()}
-                  >
-                    <ChevronLeft className="h-4 w-4 mr-1" />
-                    Previous
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => table.nextPage()}
-                    disabled={!table.getCanNextPage()}
-                  >
-                    Next
-                    <ChevronRight className="h-4 w-4 ml-1" />
-                  </Button>
-                </div>
+          {totalItems > 0 && (
+            <div className="mt-4 flex items-center justify-between flex-shrink-0">
+              {/* Row count on the left */}
+              <div className="text-xs text-pagination font-light">
+                Showing {startRow}-{endRow} of {totalItems} events
               </div>
-            )}
-          </div>)}
+
+              {/* Pagination on the right */}
+              {totalPages > 1 && (
+                <div className="flex items-center space-x-4">
+                  <div className="text-xs text-pagination font-light">
+                    Page {currentPage} of {totalPages}
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => onPageChange(currentPage - 1)}
+                      disabled={currentPage <= 1}
+                    >
+                      <ChevronLeft className="h-4 w-4 mr-1" />
+                      Previous
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => onPageChange(currentPage + 1)}
+                      disabled={currentPage >= totalPages}
+                    >
+                      Next
+                      <ChevronRight className="h-4 w-4 ml-1" />
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </DndProvider>
     </TooltipProvider>

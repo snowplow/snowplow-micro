@@ -5,10 +5,7 @@ import type { Event } from '@/services/api'
 import { DraggableColumn } from '@/components/DraggableColumn'
 import { TruncatedCell } from '@/components/TruncatedCell'
 import { TruncatedColumnName } from '@/components/TruncatedColumnName'
-import {
-  truncateJsonForDisplay,
-  valueToSearchableString,
-} from './json-fields'
+import { truncateJsonForDisplay } from './json-fields'
 import { type ColumnMetadata } from './column-metadata'
 import { hasFailureData } from './event-utils'
 
@@ -21,8 +18,6 @@ export type EventColumnMeta = {
 export type EventColumnDef = ColumnDef<Event> & {
   meta?: EventColumnMeta
 }
-
-
 
 /**
  * Generate columns from selected fields and available field info
@@ -39,10 +34,8 @@ export function generateColumns(
   // Pinned status column
   columns.push({
     id: 'status',
-    accessorFn: (row) => hasFailureData(row) ? 'failed' : 'valid',
-    header: () => (
-      <div className="text-center">Status</div>
-    ),
+    accessorFn: (row) => (hasFailureData(row) ? 'failed' : 'valid'),
+    header: () => <div className="text-center">Status</div>,
     meta: {
       eventStatusFilter: true,
     },
@@ -62,7 +55,8 @@ export function generateColumns(
         )
       }
 
-      const failureData = row.original.contexts_com_snowplowanalytics_snowplow_failure_1
+      const failureData =
+        row.original.contexts_com_snowplowanalytics_snowplow_failure_1
       if (Array.isArray(failureData) && onJsonCellToggle) {
         const failureCount = failureData.length
         return (
@@ -99,13 +93,6 @@ export function generateColumns(
     },
     enableSorting: false,
     enableColumnFilter: true,
-    filterFn: (row, _columnId, filterValue) => {
-      if (filterValue === 'all' || !filterValue) return true
-      const hasFailures = hasFailureData(row.original)
-      if (filterValue === 'valid') return !hasFailures
-      if (filterValue === 'failed') return hasFailures
-      return true
-    },
   })
 
   // Add selected columns
@@ -200,26 +187,8 @@ export function generateColumns(
         // Regular formatting for primitive values - use TruncatedCell for strings
         return <TruncatedCell value={String(value)} />
       },
-      enableSorting: true,
-      enableColumnFilter: !columnMetadata.isTimestamp,
-      sortingFn: columnMetadata.isJSON
-        ? (rowA, rowB, columnId) => {
-            const aValue = rowA.getValue(columnId)
-            const bValue = rowB.getValue(columnId)
-            const aString = valueToSearchableString(aValue)
-            const bString = valueToSearchableString(bValue)
-            return aString.localeCompare(bString)
-          }
-        : 'auto',
-      filterFn: columnMetadata.isJSON
-        ? (row, columnId, filterValue) => {
-            const value = row.getValue(columnId)
-            const searchableString = valueToSearchableString(value)
-            return searchableString
-              .toLowerCase()
-              .includes(filterValue.toLowerCase())
-          }
-        : 'includesString',
+      enableSorting: !columnMetadata.isJSON,
+      enableColumnFilter: !columnMetadata.isTimestamp && !columnMetadata.isJSON,
     }
 
     columns.push(columnDef)

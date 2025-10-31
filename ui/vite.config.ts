@@ -27,6 +27,21 @@ export default defineConfig({
         changeOrigin: true,
         secure: false,
       },
+      '/micro/timeline': {
+        target: 'http://localhost:9090',
+        changeOrigin: true,
+        secure: false,
+      },
+      '/micro/columns': {
+        target: 'http://localhost:9090',
+        changeOrigin: true,
+        secure: false,
+      },
+      '/micro/columnStats': {
+        target: 'http://localhost:9090',
+        changeOrigin: true,
+        secure: false,
+      },
       '/micro/reset': {
         target: 'http://localhost:9090',
         changeOrigin: true,

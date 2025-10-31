@@ -138,9 +138,8 @@ private[micro] class SqliteStorage(xa: Transactor[IO], maxEvents: Option[Int]) e
   def getColumnStats(columns: List[String]): IO[Map[String, ColumnStats]] = {
     // TODO: support complex columns at some point
     val simpleColumns = columns.filterNot(col =>
-      col.startsWith("contexts_") ||
-        col.startsWith("unstruct_event_") ||
-        col.endsWith("_tstamp")
+      EventStorage.isComplexColumn(col) ||
+        EventStorage.isTimestampColumn(col)
     )
 
     simpleColumns.traverse { column =>
@@ -158,6 +157,79 @@ private[micro] class SqliteStorage(xa: Transactor[IO], maxEvents: Option[Int]) e
         .transact(xa)
         .map(values => column -> ColumnStats(values))
     }.map(_.filter(_._2.values.nonEmpty).toMap)
+  }
+
+  def getFilteredEvents(request: EventsRequest): IO[EventsResponse] = {
+    val baseConditions = fr"WHERE 1=1"
+
+    // Build WHERE conditions
+    val whereConditions = List(
+      // Valid events filter
+      request.validEvents.map { validOnly =>
+        if (validOnly) fr"AND NOT failed" else fr"AND failed"
+      },
+      // Time range filter
+      request.timeRange.flatMap(_.start).map { start =>
+        fr"AND timestamp >=" ++ Fragment.const(start.toString)
+      },
+      request.timeRange.flatMap(_.end).map { end =>
+        fr"AND timestamp <" ++ Fragment.const(end.toString)
+      }
+    ).flatten
+
+    // TODO: support complex columns at some point
+    val columnFilters = request.filters
+      .filterNot(f => EventStorage.isComplexColumn(f.column))
+      .map { filter =>
+        filter.column match {
+          case "event_id" | "app_id" | "event_name" =>
+            fr"AND" ++ Fragment.const(filter.column) ++ fr"LIKE" ++ Fragment.const("'%" + filter.value + "%'")
+          case _ =>
+            fr"AND event_json->>" ++ Fragment.const("'" + filter.column + "'") ++
+              fr"LIKE" ++ Fragment.const("'%" + filter.value + "%'")
+        }
+      }
+
+    val allConditions = whereConditions ++ columnFilters
+    val whereClause = allConditions.foldLeft(baseConditions)(_ ++ _)
+
+    // TODO: support complex columns at some point
+    val orderByClause = request.sorting.filterNot(s =>
+      EventStorage.isComplexColumn(s.column)
+    ).fold(fr"ORDER BY timestamp DESC") { sorting =>
+      val columnExpr = sorting.column match {
+        case "collector_tstamp" =>
+          Fragment.const("timestamp")
+        case "event_id" | "app_id" | "event_name" =>
+          Fragment.const(sorting.column)
+        case _ =>
+          fr"event_json->>" ++ Fragment.const("'" + sorting.column + "'")
+      }
+      val direction = if (sorting.desc) "DESC" else "ASC"
+      fr"ORDER BY" ++ columnExpr ++ Fragment.const(s" $direction")
+    }
+
+    // Single query with window function to get both data and total count
+    val offset = (request.page - 1) * request.pageSize
+    val query = fr"SELECT event_json, COUNT(*) OVER() as total_count FROM events" ++
+      whereClause ++ orderByClause ++
+      fr"LIMIT" ++ Fragment.const(request.pageSize.toString) ++
+      fr"OFFSET" ++ Fragment.const(offset.toString)
+
+    query.query[(String, Int)]
+      .to[List]
+      .transact(xa)
+      .flatMap { results =>
+        val totalItems = results.headOption.map(_._2).getOrElse(0)
+        val jsonStrings = results.map(_._1)
+
+        jsonStrings.traverse { jsonStr =>
+          IO.fromEither(parser.parse(jsonStr))
+        }.map { events =>
+          val totalPages = Math.max(1, (totalItems + request.pageSize - 1) / Math.max(request.pageSize, 1))
+          EventsResponse(events, totalPages, totalItems)
+        }
+      }
   }
 }
 

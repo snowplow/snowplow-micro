@@ -23,6 +23,7 @@ trait EventStorage {
   def getColumns: IO[List[String]]
   def getTimeline: IO[TimelineData]
   def getColumnStats(columns: List[String]): IO[Map[String, ColumnStats]]
+  def getFilteredEvents(request: EventsRequest): IO[EventsResponse]
 }
 
 object NoStorage extends EventStorage {
@@ -33,6 +34,7 @@ object NoStorage extends EventStorage {
   def getColumns: IO[List[String]] = IO.pure(List.empty)
   def getTimeline: IO[TimelineData] = IO.pure(TimelineData(List.empty))
   def getColumnStats(columns: List[String]): IO[Map[String, ColumnStats]] = IO.pure(Map.empty)
+  def getFilteredEvents(request: EventsRequest): IO[EventsResponse] = IO.pure(EventsResponse(List.empty, 0, 0))
 }
 
 object EventStorage {
@@ -64,6 +66,11 @@ object EventStorage {
     }
   }
 
+  def isTimestampColumn(column: String): Boolean = column.endsWith("_tstamp")
+  def isContextsColumn(column: String): Boolean = column.startsWith("contexts_")
+  def isUnstructEventColumn(column: String): Boolean = column.startsWith("unstruct_event")
+  def isComplexColumn(column: String): Boolean = isContextsColumn(column) || isUnstructEventColumn(column)
+
   def extractColumnsFromEvent(eventJson: Json): Set[String] = {
     val columnNames = mutable.Set[String]()
 
@@ -71,7 +78,7 @@ object EventStorage {
       columnNames ++= obj.keys
 
       obj.toIterable.foreach { case (fieldName, value) =>
-        if (fieldName.startsWith("contexts_")) {
+        if (isContextsColumn(fieldName)) {
           value.asArray.foreach { arr =>
             arr.foreach { item =>
               item.asObject.foreach { obj =>
@@ -80,7 +87,7 @@ object EventStorage {
             }
           }
         }
-        else if (fieldName.startsWith("unstruct_event_")) {
+        else if (isUnstructEventColumn(fieldName)) {
           value.asObject.foreach { obj =>
             columnNames ++= obj.keys.map(key => s"$fieldName.$key")
           }

@@ -5,14 +5,12 @@ import type { Event } from '@/services/api'
  */
 export function hasFailureData(event: Event): boolean {
   const failureData = event.contexts_com_snowplowanalytics_snowplow_failure_1
-  return failureData !== undefined && failureData !== null && Array.isArray(failureData) && failureData.length > 0
-}
-
-/**
- * Round timestamp to the nearest minute
- */
-export function roundToMinute(timestamp: number): number {
-  return Math.floor(timestamp / 60000) * 60000
+  return (
+    failureData !== undefined &&
+    failureData !== null &&
+    Array.isArray(failureData) &&
+    failureData.length > 0
+  )
 }
 
 /**
@@ -33,4 +31,3 @@ export function truncateMiddle(text: string, maxLength: number = 35): string {
 
   return `${start}${ellipsis}${end}`
 }
-

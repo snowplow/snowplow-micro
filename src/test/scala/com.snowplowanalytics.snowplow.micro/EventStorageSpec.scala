@@ -374,3 +374,183 @@ trait EventStorageColumnStatsSpec {
     }
   }
 }
+
+trait EventStorageFilteredEventsSpec {
+  self: Specification =>
+
+  import InMemoryStorageSpec._
+
+  def filteredEventsTests(storageResource: Resource[IO, EventStorage], storageName: String): Fragment = {
+    s"$storageName getFilteredEvents" >> {
+      "should return all events when no filters are applied" >> {
+        storageResource.use { storage =>
+          for {
+            _ <- storage.addToGood(List(GoodEvent1, GoodEvent2))
+            request = EventsRequest(List.empty, None, None, None, 1, 10)
+            result <- storage.getFilteredEvents(request)
+          } yield {
+            result.events must have size(2)
+            result.totalItems must_== 2
+            result.totalPages must_== 1
+          }
+        }.unsafeRunSync()
+      }
+
+      "should filter by validEvents flag" >> {
+        val incompleteEvent = GoodEvent2.copy(incomplete = true)
+        storageResource.use { storage =>
+          for {
+            _ <- storage.addToGood(List(GoodEvent1, incompleteEvent))
+            validOnlyRequest = EventsRequest(List.empty, Some(true), None, None, 1, 10)
+            failedOnlyRequest = EventsRequest(List.empty, Some(false), None, None, 1, 10)
+            validResult <- storage.getFilteredEvents(validOnlyRequest)
+            failedResult <- storage.getFilteredEvents(failedOnlyRequest)
+          } yield {
+            validResult.events must have size(1)
+            validResult.totalItems must_== 1
+
+            failedResult.events must have size(1)
+            failedResult.totalItems must_== 1
+          }
+        }.unsafeRunSync()
+      }
+
+      "should filter by time range" >> {
+        storageResource.use { storage =>
+          for {
+            _ <- storage.addToGood(List(GoodEvent1, GoodEvent2, GoodEvent3))
+            startTime = GoodEvent1.event.collector_tstamp.toEpochMilli
+            endTime = GoodEvent3.event.collector_tstamp.toEpochMilli
+            timeRange = TimeRange(Some(startTime), Some(endTime))
+            request = EventsRequest(List.empty, None, Some(timeRange), None, 1, 10)
+            result <- storage.getFilteredEvents(request)
+          } yield {
+            result.events must have size(2) // Should exclude Event3
+            result.totalItems must_== 2
+          }
+        }.unsafeRunSync()
+      }
+
+      "should filter by simple column values" >> {
+        storageResource.use { storage =>
+          for {
+            _ <- storage.addToGood(List(GoodEvent1, GoodEvent2))
+            filter = EventsFilter("app_id", "test1")
+            request = EventsRequest(List(filter), None, None, None, 1, 10)
+            result <- storage.getFilteredEvents(request)
+          } yield {
+            result.events must have size(1)
+            result.totalItems must_== 1
+          }
+        }.unsafeRunSync()
+      }
+
+      "should ignore complex column filters (contexts_, unstruct_event_)" >> {
+        storageResource.use { storage =>
+          for {
+            _ <- storage.addToGood(List(GoodEvent1, GoodEvent2))
+            contextFilter = EventsFilter("contexts_some_field", "test")
+            unstructFilter = EventsFilter("unstruct_event_some_field", "test")
+            request = EventsRequest(List(contextFilter, unstructFilter), None, None, None, 1, 10)
+            result <- storage.getFilteredEvents(request)
+          } yield {
+            // Should return all events since complex filters are ignored
+            result.events must have size(2)
+            result.totalItems must_== 2
+          }
+        }.unsafeRunSync()
+      }
+
+      "should sort events by column" >> {
+        storageResource.use { storage =>
+          for {
+            _ <- storage.addToGood(List(GoodEvent1, GoodEvent2))
+            sortingAsc = EventsSorting("app_id", false)
+            sortingDesc = EventsSorting("app_id", true)
+            requestAsc = EventsRequest(List.empty, None, None, Some(sortingAsc), 1, 10)
+            requestDesc = EventsRequest(List.empty, None, None, Some(sortingDesc), 1, 10)
+            resultAsc <- storage.getFilteredEvents(requestAsc)
+            resultDesc <- storage.getFilteredEvents(requestDesc)
+          } yield {
+            // Events should be sorted differently
+            resultAsc.events must have size(2)
+            resultDesc.events must have size(2)
+            resultAsc.events.head must_!= resultDesc.events.head
+          }
+        }.unsafeRunSync()
+      }
+
+      "should support pagination" >> {
+        storageResource.use { storage =>
+          for {
+            _ <- storage.addToGood(List(GoodEvent1, GoodEvent2, GoodEvent3))
+            page1Request = EventsRequest(List.empty, None, None, None, 1, 2)
+            page2Request = EventsRequest(List.empty, None, None, None, 2, 2)
+            page1Result <- storage.getFilteredEvents(page1Request)
+            page2Result <- storage.getFilteredEvents(page2Request)
+          } yield {
+            page1Result.events must have size(2)
+            page1Result.totalItems must_== 3
+            page1Result.totalPages must_== 2
+
+            page2Result.events must have size(1)
+            page2Result.totalItems must_== 3
+            page2Result.totalPages must_== 2
+          }
+        }.unsafeRunSync()
+      }
+
+      "should handle empty filter values" >> {
+        storageResource.use { storage =>
+          for {
+            _ <- storage.addToGood(List(GoodEvent1, GoodEvent2))
+            emptyFilter = EventsFilter("app_id", "")
+            request = EventsRequest(List(emptyFilter), None, None, None, 1, 10)
+            result <- storage.getFilteredEvents(request)
+          } yield {
+            // Empty filter value should return all events
+            result.events must have size(2)
+            result.totalItems must_== 2
+          }
+        }.unsafeRunSync()
+      }
+
+      "should handle case-insensitive filtering" >> {
+        storageResource.use { storage =>
+          for {
+            _ <- storage.addToGood(List(GoodEvent1.copy(event = GoodEvent1.event.copy(app_id = Some("TestApp")))))
+            upperFilter = EventsFilter("app_id", "testapp")
+            lowerFilter = EventsFilter("app_id", "TESTAPP")
+            upperRequest = EventsRequest(List(upperFilter), None, None, None, 1, 10)
+            lowerRequest = EventsRequest(List(lowerFilter), None, None, None, 1, 10)
+            upperResult <- storage.getFilteredEvents(upperRequest)
+            lowerResult <- storage.getFilteredEvents(lowerRequest)
+          } yield {
+            upperResult.events must have size(1)
+            lowerResult.events must have size(1)
+          }
+        }.unsafeRunSync()
+      }
+
+      "should combine multiple filters" >> {
+        val event1Modified = GoodEvent1.copy(event = GoodEvent1.event.copy(app_id = Some("app1"), event_name = Some("click")))
+        val event2Modified = GoodEvent2.copy(event = GoodEvent2.event.copy(app_id = Some("app1"), event_name = Some("view")))
+        val event3Modified = GoodEvent3.copy(event = GoodEvent3.event.copy(app_id = Some("app2"), event_name = Some("click")))
+
+        storageResource.use { storage =>
+          for {
+            _ <- storage.addToGood(List(event1Modified, event2Modified, event3Modified))
+            appFilter = EventsFilter("app_id", "app1")
+            eventFilter = EventsFilter("event_name", "click")
+            request = EventsRequest(List(appFilter, eventFilter), None, None, None, 1, 10)
+            result <- storage.getFilteredEvents(request)
+          } yield {
+            // Should only match event1Modified (app1 AND click)
+            result.events must have size(1)
+            result.totalItems must_== 1
+          }
+        }.unsafeRunSync()
+      }
+    }
+  }
+}

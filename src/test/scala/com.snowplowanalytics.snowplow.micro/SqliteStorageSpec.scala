@@ -15,7 +15,7 @@ import cats.effect.IO
 import org.specs2.mutable.Specification
 import io.circe.Json
 
-class SqliteStorageSpec extends Specification with EventStorageTimelineSpec with EventStorageColumnStatsSpec {
+class SqliteStorageSpec extends Specification with EventStorageTimelineSpec with EventStorageColumnStatsSpec with EventStorageFilteredEventsSpec {
   import InMemoryStorageSpec._
   import SqliteStorageSpec._
 
@@ -115,6 +115,7 @@ class SqliteStorageSpec extends Specification with EventStorageTimelineSpec with
 
   timelineTests(SqliteStorage.inMemory(None), "SqliteStorage")
   columnStatsTests(SqliteStorage.inMemory(None), "SqliteStorage")
+  filteredEventsTests(SqliteStorage.inMemory(None), "SqliteStorage")
 
   "getTimeline with maxEvents limit" >> {
     "should handle timeline with maxEvents limit" >> {

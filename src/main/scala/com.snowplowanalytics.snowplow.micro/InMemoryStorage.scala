@@ -104,9 +104,8 @@ private[micro] class InMemoryStorage extends EventStorage {
     getEvents.map { jsonEvents =>
       // TODO: support complex columns at some point
       val simpleColumns = columns.filterNot(col =>
-        col.startsWith("contexts_") ||
-          col.startsWith("unstruct_event_") ||
-          col.endsWith("_tstamp")
+        EventStorage.isComplexColumn(col) ||
+          EventStorage.isTimestampColumn(col)
       )
 
       simpleColumns.flatMap { column =>
@@ -134,6 +133,48 @@ private[micro] class InMemoryStorage extends EventStorage {
       val filtered = bad.filter(keepBadEvent(_, filtersBad))
       filtered.take(filtersBad.limit.getOrElse(filtered.size))
     }
+
+  def getFilteredEvents(request: EventsRequest): IO[EventsResponse] = {
+    IO.delay {
+      val events = getGoodAndIncomplete
+
+      val preFilteredEvents = events.filter { event =>
+        request.validEvents.forall { validOnly =>
+          validOnly == !event.incomplete
+        } &&
+        request.timeRange.forall { timeRange =>
+          applyTimeFilter(event, timeRange)
+        }
+      }
+
+      val filteredEvents = preFilteredEvents
+        .map(_.event.toJson(lossy = true))
+        .filter { eventJson =>
+          request.filters.filterNot(f => EventStorage.isComplexColumn(f.column)).forall { filter =>
+            applyFilter(eventJson, filter.column, filter.value)
+          }
+        }
+
+      val sortedEvents = request.sorting match {
+        case Some(sorting) if !EventStorage.isComplexColumn(sorting.column) =>
+          applySorting(filteredEvents, sorting)
+        case None => filteredEvents
+      }
+
+      val totalItems = sortedEvents.size
+      val totalPages = Math.max(1, (totalItems + request.pageSize - 1) / Math.max(request.pageSize, 1))
+      val startIndex = (request.page - 1) * request.pageSize
+      val endIndex = Math.min(startIndex + request.pageSize, totalItems)
+
+      val pageEvents = if (startIndex < totalItems) {
+        sortedEvents.slice(startIndex, endIndex)
+      } else {
+        List.empty
+      }
+
+      EventsResponse(pageEvents, totalPages, totalItems)
+    }
+  }
 }
 
 private[micro] object InMemoryStorage {
@@ -143,7 +184,7 @@ private[micro] object InMemoryStorage {
       filters.schema.toSet.subsetOf(event.schema.toSet) &&
       filters.contexts.forall(containsAllContexts(event, _))
 
-  /** Check if an event conntains all the contexts of the list. */
+  /** Check if an event contains all the contexts of the list. */
   private[micro] def containsAllContexts(event: GoodEvent, contexts: List[String]): Boolean =
     contexts.forall(event.contexts.contains)
 
@@ -151,4 +192,50 @@ private[micro] object InMemoryStorage {
   private[micro] def keepBadEvent(event: BadEvent, filters: FiltersBad): Boolean =
     filters.vendor.forall(vendor => event.collectorPayload.forall(_ .api.vendor == vendor)) &&
       filters.version.forall(version => event.collectorPayload.forall(_ .api.version == version))
+
+  /* --- Filters and sorting for the newer /micro/events endpoint */
+
+  private[micro] def getColumnValue(eventJson: Json, column: String): Option[String] = {
+    if (EventStorage.isComplexColumn(column)) {
+      // TODO: support complex columns
+      None
+    } else {
+      // Handle simple columns
+      eventJson.asObject
+        .flatMap(_.apply(column))
+        .map(value => value.asString.getOrElse(value.noSpaces))
+    }
+  }
+
+  private[micro] def applyFilter(eventJson: Json, column: String, filterValue: String): Boolean = {
+    if (filterValue.isEmpty) return true
+
+    getColumnValue(eventJson, column) match {
+      case Some(value) => value.toLowerCase.contains(filterValue.toLowerCase)
+      case None => false
+    }
+  }
+
+  private[micro] def applyTimeFilter(goodEvent: GoodEvent, timeRange: TimeRange): Boolean = {
+    val timestamp = goodEvent.event.collector_tstamp.toEpochMilli
+    val afterStart = timeRange.start.forall(start => timestamp >= start)
+    val beforeEnd = timeRange.end.forall(end => timestamp < end)
+    afterStart && beforeEnd
+  }
+
+  private[micro] def applySorting(events: List[Json], sorting: EventsSorting): List[Json] = {
+    val sorted = events.sortWith { (a, b) =>
+      val valueA = getColumnValue(a, sorting.column)
+      val valueB = getColumnValue(b, sorting.column)
+
+      (valueA, valueB) match {
+        case (Some(va), Some(vb)) =>
+          if (sorting.desc) vb.compare(va) < 0 else va.compare(vb) < 0
+        case (Some(_), None) => !sorting.desc // Non-null values first when ascending
+        case (None, Some(_)) => sorting.desc
+        case (None, None) => false
+      }
+    }
+    sorted
+  }
 }
