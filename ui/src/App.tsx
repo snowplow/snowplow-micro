@@ -3,7 +3,7 @@ import { DataTable } from '@/components/DataTable'
 import { ColumnSelector } from '@/components/ColumnSelector'
 import { JsonSidePanel } from '@/components/JsonSidePanel'
 import { EventsChart } from '@/components/EventsChart'
-import { type Event, type TimelineData, EventsApiService } from '@/services/api'
+import { type Event, type TimelineData, type ColumnStats, EventsApiService } from '@/services/api'
 import { useColumnManager } from '@/hooks/useColumnManager'
 import { Button } from '@/components/ui/button'
 import {
@@ -32,6 +32,7 @@ function App() {
   const [selectedMinute, setSelectedMinute] = useState<string | null>(null)
   const [lastRefreshTime, setLastRefreshTime] = useState<Date | null>(null)
   const [showActionsMenu, setShowActionsMenu] = useState(false)
+  const [columnStats, setColumnStats] = useState<Record<string, ColumnStats>>({})
 
   // Handle scrolling to newly added columns
   const scrollToLastColumn = () => {
@@ -48,8 +49,26 @@ function App() {
     }, 100)
   }
 
+  // Update column stats when columns change
+  const updateColumnStats = async () => {
+    const selectedColumnNames = selectedColumns.map(col => col.name)
+    try {
+      const stats = await EventsApiService.fetchColumnStats(selectedColumnNames)
+      setColumnStats(stats)
+    } catch (err) {
+      console.warn('Failed to fetch column stats:', err)
+    }
+  }
+
   const { availableColumns, selectedColumns, toggleColumn, reorderColumns, resetToDefaults } =
-    useColumnManager({ availableColumnNames, setColumnFilters, onColumnAdded: scrollToLastColumn })
+    useColumnManager({
+      availableColumnNames,
+      setColumnFilters,
+      onColumnAdded: () => {
+        scrollToLastColumn()
+        updateColumnStats()
+      }
+    })
 
   // Filter events based on selected minute
   const filteredEvents = events.filter((event) => {
@@ -69,14 +88,19 @@ function App() {
     setIsLoading(true)
 
     try {
-      const [fetchedEvents, fetchedTimeline, fetchedColumns] = await Promise.all([
+      const selectedColumnNames = selectedColumns.map(col => col.name)
+
+      const [fetchedEvents, fetchedTimeline, fetchedColumns, fetchedColumnStats] = await Promise.all([
         EventsApiService.fetchEvents(),
         EventsApiService.fetchTimeline(),
         EventsApiService.fetchColumns(),
+        EventsApiService.fetchColumnStats(selectedColumnNames)
       ])
+
       setEvents(fetchedEvents)
       setTimelineData(fetchedTimeline)
       setAvailableColumnNames(fetchedColumns)
+      setColumnStats(fetchedColumnStats)
       setLastRefreshTime(new Date())
     } catch (err) {
       console.error('Failed to fetch events:', err)
@@ -303,6 +327,7 @@ function App() {
               onReorderColumns={reorderColumns}
               onRowClick={handleRowClick}
               selectedRowId={selectedRowId}
+              columnStats={columnStats}
             />
           </div>
         </div>

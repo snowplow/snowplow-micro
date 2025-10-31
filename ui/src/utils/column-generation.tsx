@@ -23,36 +23,16 @@ export type EventColumnDef = ColumnDef<Event> & {
 }
 
 
-/**
- * Get distinct values for a column from the data
- */
-function getDistinctValues(events: Event[], columnMetadata: ColumnMetadata): string[] {
-  const values = new Set<string>()
-
-  events.forEach((event) => {
-    const value = columnMetadata.accessor(event)
-    if (value !== undefined && value !== null) {
-      if (columnMetadata.isJSON) {
-        // For JSON columns, use the searchable string representation
-        values.add(valueToSearchableString(value))
-      } else {
-        values.add(String(value))
-      }
-    }
-  })
-
-  return Array.from(values).sort()
-}
 
 /**
  * Generate columns from selected fields and available field info
  */
 export function generateColumns(
   selectedColumns: ColumnMetadata[],
-  events: Event[],
   selectedCellId: string | null,
   onJsonCellToggle: (cellId: string, value: any, title: string) => void,
-  onReorderColumns: (fromIndex: number, toIndex: number) => void
+  onReorderColumns: (fromIndex: number, toIndex: number) => void,
+  columnStats?: Record<string, { values: string[] }>
 ): EventColumnDef[] {
   const columns: EventColumnDef[] = []
 
@@ -132,11 +112,9 @@ export function generateColumns(
   selectedColumns.forEach((columnMetadata, index) => {
     const { name: fieldName } = columnMetadata
 
-    // Get distinct values for filterable columns (exclude only timestamps)
-    const distinctValues = !columnMetadata.isTimestamp
-      ? getDistinctValues(events, columnMetadata)
-      : []
-    const useAutocomplete = distinctValues.length > 0 && distinctValues.length <= 20
+    // Use backend columnStats if available, otherwise no autocomplete
+    const distinctValues = columnStats?.[fieldName]?.values ?? []
+    const useAutocomplete = distinctValues.length > 0
 
     const columnDef: EventColumnDef = {
       id: fieldName,

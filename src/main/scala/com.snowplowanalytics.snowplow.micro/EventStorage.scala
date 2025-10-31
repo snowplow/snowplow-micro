@@ -15,9 +15,6 @@ import com.snowplowanalytics.snowplow.micro.Configuration.MicroConfig
 import io.circe.Json
 import scala.collection.mutable
 
-case class TimelinePoint(validEvents: Int, failedEvents: Int, timestamp: Long)
-case class TimelineData(points: List[TimelinePoint])
-
 trait EventStorage {
   def addToGood(events: List[GoodEvent]): IO[Unit]
   def addToBad(events: List[BadEvent]): IO[Unit]
@@ -25,6 +22,7 @@ trait EventStorage {
   def getEvents: IO[List[Json]]
   def getColumns: IO[List[String]]
   def getTimeline: IO[TimelineData]
+  def getColumnStats(columns: List[String]): IO[Map[String, ColumnStats]]
 }
 
 object NoStorage extends EventStorage {
@@ -34,6 +32,7 @@ object NoStorage extends EventStorage {
   def getEvents: IO[List[Json]] = IO.pure(List.empty)
   def getColumns: IO[List[String]] = IO.pure(List.empty)
   def getTimeline: IO[TimelineData] = IO.pure(TimelineData(List.empty))
+  def getColumnStats(columns: List[String]): IO[Map[String, ColumnStats]] = IO.pure(Map.empty)
 }
 
 object EventStorage {

@@ -45,6 +45,10 @@ sealed trait MicroRoutes[S <: EventStorage] extends Http4sDsl[IO] {
       storage.getColumns.flatMap(columns => Ok(columns))
     case GET -> Root / "micro" / "timeline" =>
       storage.getTimeline.flatMap(timeline => Ok(timeline))
+    case request @ POST -> Root / "micro" / "columnStats" =>
+      request.as[ColumnStatsRequest].flatMap { req =>
+        storage.getColumnStats(req.columns).flatMap(stats => Ok(stats))
+      }
     case GET -> Root / "micro" / "iglu" / vendor / name / "jsonschema" / versionVar =>
       lookupSchema(vendor, name, versionVar)
     case GET -> "micro" /: path if path.startsWithString("ui") =>
@@ -148,7 +152,9 @@ object Routing {
   implicit val re: Encoder[ResolutionError] = deriveEncoder
   implicit val tp: Encoder[TimelinePoint] = deriveEncoder
   implicit val td: Encoder[TimelineData] = deriveEncoder
+  implicit val cs: Encoder[ColumnStats] = deriveEncoder
 
   implicit val fg: Decoder[FiltersGood] = deriveDecoder
   implicit val fb: Decoder[FiltersBad] = deriveDecoder
+  implicit val csr: Decoder[ColumnStatsRequest] = deriveDecoder
 }

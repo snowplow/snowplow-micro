@@ -134,6 +134,31 @@ private[micro] class SqliteStorage(xa: Transactor[IO], maxEvents: Option[Int]) e
         TimelineData(filledPoints)
       }
   }
+
+  def getColumnStats(columns: List[String]): IO[Map[String, ColumnStats]] = {
+    // TODO: support complex columns at some point
+    val simpleColumns = columns.filterNot(col =>
+      col.startsWith("contexts_") ||
+        col.startsWith("unstruct_event_") ||
+        col.endsWith("_tstamp")
+    )
+
+    simpleColumns.traverse { column =>
+      val query = column match {
+        case "event_id" | "app_id" | "event_name"  =>
+          fr"SELECT DISTINCT" ++ Fragment.const(column) ++ fr"as value FROM events" ++
+            fr"WHERE value IS NOT NULL LIMIT 20"
+        case _ =>
+          fr"SELECT DISTINCT event_json->>" ++ Fragment.const("'" + column + "'") ++ fr"as value FROM events" ++
+            fr"WHERE value IS NOT NULL AND value != 'null' LIMIT 20"
+      }
+
+      query.query[String]
+        .to[List]
+        .transact(xa)
+        .map(values => column -> ColumnStats(values))
+    }.map(_.filter(_._2.values.nonEmpty).toMap)
+  }
 }
 
 private[micro] object SqliteStorage {

@@ -48,3 +48,11 @@ private [micro] final case class FiltersBad(
 
 /** Retuned when /micro/all is queried, and also /micro/reset. */
 private [micro] final case class ValidationSummary(total: Int, good: Int, bad: Int)
+
+/** Timeline data structures for /micro/timeline endpoint. */
+final case class TimelinePoint(validEvents: Int, failedEvents: Int, timestamp: Long)
+final case class TimelineData(points: List[TimelinePoint])
+
+/** Column statistics data structures for /micro/columnStats endpoint. */
+final case class ColumnStats(values: List[String])
+final case class ColumnStatsRequest(columns: List[String])

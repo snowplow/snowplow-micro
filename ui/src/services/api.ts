@@ -13,6 +13,14 @@ export type TimelineData = {
   points: TimelinePoint[]
 }
 
+export type ColumnStats = {
+  values: string[]
+}
+
+export type ColumnStatsRequest = {
+  columns: string[]
+}
+
 export class EventsApiService {
   /**
    * Fetch events from the snowplow-micro backend
@@ -89,5 +97,28 @@ export class EventsApiService {
 
     const data = await response.json()
     return data as TimelineData
+  }
+
+  /**
+   * Fetch column statistics from the backend
+   */
+  static async fetchColumnStats(columns: string[]): Promise<Record<string, ColumnStats>> {
+    const url = new URL('/micro/columnStats', window.location.origin)
+
+    const response = await fetch(url.toString(), {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ columns }),
+    })
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+    }
+
+    const data = await response.json()
+    return data as Record<string, ColumnStats>
   }
 }

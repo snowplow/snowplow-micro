@@ -100,6 +100,32 @@ private[micro] class InMemoryStorage extends EventStorage {
     TimelineData(filledPoints)
   }
 
+  def getColumnStats(columns: List[String]): IO[Map[String, ColumnStats]] = {
+    getEvents.map { jsonEvents =>
+      // TODO: support complex columns at some point
+      val simpleColumns = columns.filterNot(col =>
+        col.startsWith("contexts_") ||
+          col.startsWith("unstruct_event_") ||
+          col.endsWith("_tstamp")
+      )
+
+      simpleColumns.flatMap { column =>
+        val distinctValues = jsonEvents.flatMap { json =>
+          json.asObject.flatMap(_.apply(column)).flatMap {
+            case value if value.isNull => None
+            case value => Some(value.asString.getOrElse(value.noSpaces))
+          }
+        }.distinct.take(20)
+
+        if (distinctValues.nonEmpty) {
+          Some(column -> ColumnStats(distinctValues))
+        } else {
+          None
+        }
+      }.toMap
+    }
+  }
+
   /** Filter out the bad events with the possible filters contained in the HTTP request. */
   def filterBad(
     filtersBad: FiltersBad = FiltersBad(None, None, None)

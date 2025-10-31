@@ -29,7 +29,7 @@ import { TooltipProvider } from '@/components/ui/tooltip'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 
 import { generateColumns, type EventColumnDef, type EventColumnMeta } from '@/utils/column-generation'
-import type { Event } from '@/services/api'
+import type { Event, ColumnStats } from '@/services/api'
 import { type ColumnMetadata } from '@/utils/column-metadata'
 import { ColumnAutocomplete } from '@/components/ColumnAutocomplete'
 import { StatusDropdown } from '@/components/StatusDropdown'
@@ -45,6 +45,7 @@ type DataTableProps = {
   onJsonCellToggle: (cellId: string, value: any, title: string) => void
   onReorderColumns: (fromIndex: number, toIndex: number) => void
   onRowClick: (rowId: string, event: Event) => void
+  columnStats?: Record<string, ColumnStats>
 }
 
 export function DataTable({
@@ -58,6 +59,7 @@ export function DataTable({
   onJsonCellToggle,
   onReorderColumns,
   onRowClick,
+  columnStats,
 }: DataTableProps) {
   const [sorting, setSorting] = useState<SortingState>([])
   const [initialSortSet, setInitialSortSet] = useState(false)
@@ -76,12 +78,12 @@ export function DataTable({
   const columns: EventColumnDef[] = useMemo(() => {
     return generateColumns(
       selectedColumns,
-      events,
       selectedCellId,
       onJsonCellToggle,
-      onReorderColumns
+      onReorderColumns,
+      columnStats
     )
-  }, [selectedColumns, events, selectedCellId, onJsonCellToggle, onReorderColumns])
+  }, [selectedColumns, events, selectedCellId, onJsonCellToggle, onReorderColumns, columnStats])
 
   const table = useReactTable({
     data: events,
