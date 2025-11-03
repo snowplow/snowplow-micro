@@ -18,9 +18,19 @@ Table.displayName = 'Table'
 
 const TableHeader = React.forwardRef<
   HTMLTableSectionElement,
-  React.HTMLAttributes<HTMLTableSectionElement>
->(({ className, ...props }, ref) => (
-  <thead ref={ref} className={cn('sticky top-0 z-10 bg-background', className)} {...props} />
+  React.HTMLAttributes<HTMLTableSectionElement> & {
+    isLoading?: boolean
+  }
+>(({ className, isLoading, ...props }, ref) => (
+  <thead
+    ref={ref}
+    className={cn(
+      'sticky top-0 z-10 bg-background',
+      isLoading && 'gradient-loading-border',
+      className
+    )}
+    {...props}
+  />
 ))
 TableHeader.displayName = 'TableHeader'
 

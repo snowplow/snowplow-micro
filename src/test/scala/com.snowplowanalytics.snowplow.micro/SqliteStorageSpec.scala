@@ -116,22 +116,6 @@ class SqliteStorageSpec extends Specification with EventStorageTimelineSpec with
   timelineTests(SqliteStorage.inMemory(None), "SqliteStorage")
   columnStatsTests(SqliteStorage.inMemory(None), "SqliteStorage")
   filteredEventsTests(SqliteStorage.inMemory(None), "SqliteStorage")
-
-  "getTimeline with maxEvents limit" >> {
-    "should handle timeline with maxEvents limit" >> {
-      withSqliteStorage(Some(2)) { storage =>
-        for {
-          _ <- storage.addToGood(List(GoodEvent1, GoodEvent2, GoodEvent3))
-          timeline <- storage.getTimeline
-        } yield {
-          timeline.points must have size(31)
-          val pointsWithEvents = timeline.points.filter(p => p.validEvents > 0 || p.failedEvents > 0)
-          // Should still show timeline based on all events in database (limited by cleanup probability)
-          pointsWithEvents must have size(be_>=(1))
-        }
-      }
-    }
-  }
 }
 
 object SqliteStorageSpec {

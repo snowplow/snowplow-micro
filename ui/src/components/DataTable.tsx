@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect } from 'react'
+import React, { useMemo } from 'react'
 import {
   useReactTable,
   getCoreRowModel,
@@ -52,7 +52,8 @@ type DataTableProps = {
   totalItems: number
   onPageChange: (page: number) => void
   sorting: SortingState
-  onSortingChange: (sorting: SortingState) => void
+  onSortingChange: OnChangeFn<SortingState>
+  isLoading?: boolean
 }
 
 export function DataTable({
@@ -73,6 +74,7 @@ export function DataTable({
   onPageChange,
   sorting,
   onSortingChange,
+  isLoading,
 }: DataTableProps) {
 
   // Events are already in the correct format for react-table
@@ -125,7 +127,7 @@ export function DataTable({
           {/* Table container with scrolling */}
           <div className="flex-1 overflow-auto rounded-md border bg-background">
             <Table className="table-auto">
-              <TableHeader>
+              <TableHeader isLoading={isLoading}>
                 {table.getHeaderGroups().map((headerGroup) => (
                   <React.Fragment key={headerGroup.id}>
                     <TableRow>

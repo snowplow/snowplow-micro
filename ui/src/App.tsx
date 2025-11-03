@@ -39,6 +39,7 @@ function App() {
   const [timelineData, setTimelineData] = useState<TimelineData>({ points: [] })
   const [availableColumnNames, setAvailableColumnNames] = useState<string[]>([])
   const [isLoading, setIsLoading] = useState(false)
+  const [isRefreshing, setIsRefreshing] = useState(false)
   const [showColumnSelector, setShowColumnSelector] = useState(false)
   const [selectedCellId, setSelectedCellId] = useState<string | null>(null)
   const [selectedRowId, setSelectedRowId] = useState<string | null>(null)
@@ -181,7 +182,7 @@ function App() {
   }
 
   const refreshAllData = async () => {
-    setIsLoading(true)
+    setIsRefreshing(true)
     try {
       setCurrentPage(1)
       const selectedColumnNames = selectedColumns.map((col) => col.name)
@@ -207,7 +208,7 @@ function App() {
     } catch (err) {
       console.error('Failed to refresh data:', err)
     } finally {
-      setIsLoading(false)
+      setIsRefreshing(false)
     }
   }
 
@@ -217,7 +218,7 @@ function App() {
     )
     if (!confirmed) return
 
-    setIsLoading(true)
+    setIsRefreshing(true)
     try {
       await EventsApiService.resetEvents()
       setEventData({ events: [], totalPages: 0, totalItems: 0 })
@@ -229,7 +230,7 @@ function App() {
     } catch (err) {
       console.error('Failed to reset events:', err)
     } finally {
-      setIsLoading(false)
+      setIsRefreshing(false)
     }
   }
 
@@ -341,10 +342,10 @@ function App() {
               variant="outline"
               size="sm"
               onClick={() => refreshAllData()}
-              disabled={isLoading}
+              disabled={isRefreshing}
             >
               <RefreshCw
-                className={`mr-2 h-4 w-4 ${isLoading ? 'animate-spin' : ''}`}
+                className={`mr-2 h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`}
               />
               Refresh
             </Button>
@@ -447,6 +448,7 @@ function App() {
               onPageChange={setCurrentPage}
               sorting={sorting}
               onSortingChange={setSorting}
+              isLoading={isLoading}
             />
           </div>
         </div>

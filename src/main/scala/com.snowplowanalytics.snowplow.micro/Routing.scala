@@ -47,17 +47,27 @@ sealed trait MicroRoutes[S <: EventStorage] extends Http4sDsl[IO] {
       }
     case GET -> Root / "micro" / "columns" =>
       storage.getColumns.flatMap(columns => Ok(columns))
-    case GET -> Root / "micro" / "timeline" =>
-      storage.getTimeline.flatMap(timeline => Ok(timeline))
     case request @ POST -> Root / "micro" / "columnStats" =>
       request.as[ColumnStatsRequest].flatMap { req =>
         storage.getColumnStats(req.columns).flatMap(stats => Ok(stats))
       }
+    case GET -> Root / "micro" / "timeline" =>
+      storage.getTimeline.flatMap(timeline => Ok(timeline))
     case GET -> Root / "micro" / "iglu" / vendor / name / "jsonschema" / versionVar =>
       lookupSchema(vendor, name, versionVar)
     case GET -> "micro" /: path if path.startsWithString("ui") =>
       handleUIPath(path)
   }
+
+  protected def commonEndpoints = List(
+    "/micro/events",
+    "/micro/reset",
+    "/micro/columns",
+    "/micro/columnStats",
+    "/micro/timeline",
+    "/micro/iglu",
+    "/micro/ui"
+  )
 
   private def handleUIPath(path: Path): IO[Response[IO]] = {
     path match {
@@ -104,7 +114,7 @@ final class InMemoryRoutes(protected val igluResolver: Resolver[IO], protected v
         Ok(storage.filterBad(filters))
       }
     case _ -> "micro" /: _ =>
-      NotFound("Supported endpoints: /micro/events, /micro/columns, /micro/timeline, /micro/all, /micro/good, /micro/bad, /micro/reset, /micro/iglu, /micro/ui")
+      NotFound(s"Supported endpoints: /micro/all, /micro/good, /micro/bad, ${commonEndpoints.mkString(", ")}")
   }
 
   val routes: HttpRoutes[IO] = commonRoutes <+> inMemoryRoutes
@@ -115,7 +125,7 @@ final class SqliteRoutes(protected val igluResolver: Resolver[IO],
                         (implicit protected val lookup: RegistryLookup[IO]) extends MicroRoutes[SqliteStorage] {
   private val sqliteRoutes: HttpRoutes[IO] = HttpRoutes.of[IO] {
     case _ -> "micro" /: _ =>
-      NotFound("Supported endpoints: /micro/events, /micro/columns, /micro/timeline, /micro/reset, /micro/iglu, /micro/ui")
+      NotFound(s"Supported endpoints: ${commonEndpoints.mkString(", ")}")
   }
 
   val routes: HttpRoutes[IO] = commonRoutes <+> sqliteRoutes

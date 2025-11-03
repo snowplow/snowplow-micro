@@ -70,15 +70,24 @@ private[micro] class InMemoryStorage extends EventStorage {
       filtered.take(filtersGood.limit.getOrElse(filtered.size))
     }
 
+  /** Filter out the bad events with the possible filters contained in the HTTP request. */
+  def filterBad(
+    filtersBad: FiltersBad = FiltersBad(None, None, None)
+  ): List[BadEvent] =
+    LockBad.synchronized {
+      val filtered = bad.filter(keepBadEvent(_, filtersBad))
+      filtered.take(filtersBad.limit.getOrElse(filtered.size))
+    }
+
   /** Get all good + incomplete events */
   def getGoodAndIncomplete: List[GoodEvent] =
     LockGood.synchronized(good)
 
-  def getEvents: IO[List[Json]] = IO.delay {
+  override def getEvents: IO[List[Json]] = IO.delay {
     getGoodAndIncomplete.map(_.event.toJson(lossy = true))
   }
 
-  def getColumns: IO[List[String]] = {
+  override def getColumns: IO[List[String]] = {
     getEvents.map { jsonEvents =>
       jsonEvents.map(EventStorage.extractColumnsFromEvent)
         .fold(Set.empty[String])(_.union(_))
@@ -87,7 +96,7 @@ private[micro] class InMemoryStorage extends EventStorage {
     }
   }
 
-  def getTimeline: IO[TimelineData] = IO.delay {
+  override def getTimeline: IO[TimelineData] = IO.delay {
     val groupedByMinute = LockGood.synchronized {
       good.groupBy(event => EventStorage.roundToMinute(event.event.collector_tstamp.toEpochMilli))
         .map {
@@ -100,7 +109,7 @@ private[micro] class InMemoryStorage extends EventStorage {
     TimelineData(filledPoints)
   }
 
-  def getColumnStats(columns: List[String]): IO[Map[String, ColumnStats]] = {
+  override def getColumnStats(columns: List[String]): IO[Map[String, ColumnStats]] = {
     getEvents.map { jsonEvents =>
       // TODO: support complex columns at some point
       val simpleColumns = columns.filterNot(col =>
@@ -125,16 +134,7 @@ private[micro] class InMemoryStorage extends EventStorage {
     }
   }
 
-  /** Filter out the bad events with the possible filters contained in the HTTP request. */
-  def filterBad(
-    filtersBad: FiltersBad = FiltersBad(None, None, None)
-  ): List[BadEvent] =
-    LockBad.synchronized {
-      val filtered = bad.filter(keepBadEvent(_, filtersBad))
-      filtered.take(filtersBad.limit.getOrElse(filtered.size))
-    }
-
-  def getFilteredEvents(request: EventsRequest): IO[EventsResponse] = {
+  override def getFilteredEvents(request: EventsRequest): IO[EventsResponse] = {
     IO.delay {
       val events = getGoodAndIncomplete
 

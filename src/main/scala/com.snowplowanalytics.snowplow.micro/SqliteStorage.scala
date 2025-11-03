@@ -73,12 +73,12 @@ private[micro] class SqliteStorage(xa: Transactor[IO], maxEvents: Option[Int]) e
   override def addToBad(events: List[BadEvent]): IO[Unit] = IO.unit
 
   /** Reset storage by deleting all events. */
-  def reset(): IO[Unit] = {
+  override def reset(): IO[Unit] = {
     (sql"DELETE FROM events".update.run *> sql"DELETE FROM columns".update.run).transact(xa).void
   }
 
   /** Get all events as JSON for the /micro/events endpoint. */
-  def getEvents: IO[List[Json]] = {
+  override def getEvents: IO[List[Json]] = {
     val query = maxEvents match {
       case Some(limit) => sql"SELECT event_json FROM events ORDER BY timestamp DESC LIMIT $limit"
       case None => sql"SELECT event_json FROM events ORDER BY timestamp DESC"
@@ -95,14 +95,14 @@ private[micro] class SqliteStorage(xa: Transactor[IO], maxEvents: Option[Int]) e
       }
   }
 
-  def getColumns: IO[List[String]] = {
+  override def getColumns: IO[List[String]] = {
     sql"SELECT name FROM columns ORDER BY name"
       .query[String]
       .to[List]
       .transact(xa)
   }
 
-  def getTimeline: IO[TimelineData] = {
+  override def getTimeline: IO[TimelineData] = {
     val query = sql"""
       WITH latest_event AS (
         SELECT COALESCE(MAX(timestamp), ${System.currentTimeMillis()}) as max_timestamp FROM events
@@ -135,7 +135,7 @@ private[micro] class SqliteStorage(xa: Transactor[IO], maxEvents: Option[Int]) e
       }
   }
 
-  def getColumnStats(columns: List[String]): IO[Map[String, ColumnStats]] = {
+  override def getColumnStats(columns: List[String]): IO[Map[String, ColumnStats]] = {
     // TODO: support complex columns at some point
     val simpleColumns = columns.filterNot(col =>
       EventStorage.isComplexColumn(col) ||
@@ -159,7 +159,7 @@ private[micro] class SqliteStorage(xa: Transactor[IO], maxEvents: Option[Int]) e
     }.map(_.filter(_._2.values.nonEmpty).toMap)
   }
 
-  def getFilteredEvents(request: EventsRequest): IO[EventsResponse] = {
+  override def getFilteredEvents(request: EventsRequest): IO[EventsResponse] = {
     val baseConditions = fr"WHERE 1=1"
 
     // Build WHERE conditions

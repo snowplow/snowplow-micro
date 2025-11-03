@@ -86,3 +86,32 @@ body {
     border-radius: 4px;
     background-color: rgba(0,0,0,.2);
 }
+
+/* Loading gradient border animation */
+@keyframes gradient-loading {
+  0% { background-position: 120% 50%; }
+  100% { background-position: -120% 50%; }
+}
+
+.gradient-loading-border {
+  position: relative;
+}
+
+.gradient-loading-border::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 1px;
+  background: linear-gradient(90deg,
+    hsl(var(--border)) 0%,
+    hsl(var(--border)) 35%,
+    var(--color-brand-primary) 50%,
+    hsl(var(--border)) 65%,
+    hsl(var(--border)) 100%
+  );
+  background-size: 200% 100%;
+  animation: gradient-loading 1s ease-in-out infinite;
+  z-index: 1;
+}
