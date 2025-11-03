@@ -25,11 +25,11 @@ class SqliteStorageSpec extends Specification with EventStorageTimelineSpec with
         for {
           _ <- storage.addToGood(List(GoodEvent1, GoodEvent2))
           _ <- storage.addToBad(List(BadEvent1))
-          events <- storage.getEvents
+          events <- storage.getFilteredEvents(allEventsRequest)
         } yield {
-          events.size must_== 2
+          events.events.size must_== 2
           // Events should be ordered by timestamp DESC
-          events.map(_.hcursor.get[String]("event_id").toOption) must_==
+          events.events.map(_.hcursor.get[String]("event_id").toOption) must_==
             List(Some(GoodEvent2.event.event_id.toString), Some(GoodEvent1.event.event_id.toString))
         }
       }
@@ -41,12 +41,12 @@ class SqliteStorageSpec extends Specification with EventStorageTimelineSpec with
       withSqliteStorage() { storage =>
         for {
           _ <- storage.addToGood(List(GoodEvent1, GoodEvent2))
-          eventsBefore <- storage.getEvents
+          eventsBefore <- storage.getFilteredEvents(allEventsRequest)
           _ <- storage.reset()
-          eventsAfter <- storage.getEvents
+          eventsAfter <- storage.getFilteredEvents(allEventsRequest)
         } yield {
-          eventsBefore.size must_== 2
-          eventsAfter.size must_== 0
+          eventsBefore.events.size must_== 2
+          eventsAfter.events.size must_== 0
         }
       }
     }
@@ -54,34 +54,38 @@ class SqliteStorageSpec extends Specification with EventStorageTimelineSpec with
 
   "maxEvents" >> {
     "should limit the number of stored events when adding one by one" >> {
+      // a low limit like 1 will guarantee immediate eviction
+      // (much higher limits are probabilistic so harder to test)
       withSqliteStorage(Some(1)) { storage =>
         for {
           _ <- storage.addToGood(List(GoodEvent1))
-          events1 <- storage.getEvents
+          events1 <- storage.getFilteredEvents(allEventsRequest)
           _ <- storage.addToGood(List(GoodEvent2))
-          events2 <- storage.getEvents
+          events2 <- storage.getFilteredEvents(allEventsRequest)
         } yield {
-          events1.size must_== 1
-          events2.size must_== 1
+          events1.events.size must_== 1
+          events2.events.size must_== 1
           // Should keep the most recent event
-          events2.head.hcursor.get[String]("event_id").toOption must
+          events2.events.head.hcursor.get[String]("event_id").toOption must
             beSome(GoodEvent2.event.event_id.toString)
         }
       }
     }
 
     "should limit the number of stored events across multiple batches" >> {
+      // a low limit like 2 will guarantee immediate eviction
+      // (much higher limits are probabilistic so harder to test)
       withSqliteStorage(Some(2)) { storage =>
         for {
           _ <- storage.addToGood(List(GoodEvent1, GoodEvent2))
-          eventsAfterFirst <- storage.getEvents
+          eventsAfterFirst <- storage.getFilteredEvents(allEventsRequest)
           _ <- storage.addToGood(List(GoodEvent3))
-          eventsAfterSecond <- storage.getEvents
+          eventsAfterSecond <- storage.getFilteredEvents(allEventsRequest)
         } yield {
-          eventsAfterFirst.size must_== 2
-          eventsAfterSecond.size must_== 2
+          eventsAfterFirst.events.size must_== 2
+          eventsAfterSecond.events.size must_== 2
           // Should keep one event from first batch and one from second batch
-          val eventIds = eventsAfterSecond.map(_.hcursor.get[String]("event_id").toOption.get)
+          val eventIds = eventsAfterSecond.events.map(_.hcursor.get[String]("event_id").toOption.get)
           eventIds must contain(allOf(
             GoodEvent2.event.event_id.toString, // most recent from first batch
             GoodEvent3.event.event_id.toString  // from second batch
@@ -96,11 +100,11 @@ class SqliteStorageSpec extends Specification with EventStorageTimelineSpec with
       withSqliteStorage() { storage =>
         for {
           _ <- storage.addToGood(List(GoodEvent1))
-          events <- storage.getEvents
+          events <- storage.getFilteredEvents(allEventsRequest)
         } yield {
-          events.size must_== 1
-          events.head must beAnInstanceOf[Json]
-          events.head.hcursor.get[String]("event_id").toOption must
+          events.events.size must_== 1
+          events.events.head must beAnInstanceOf[Json]
+          events.events.head.hcursor.get[String]("event_id").toOption must
             beSome(GoodEvent1.event.event_id.toString)
         }
       }
@@ -108,7 +112,7 @@ class SqliteStorageSpec extends Specification with EventStorageTimelineSpec with
 
     "should return empty list when no events" >> {
       withSqliteStorage() { storage =>
-        storage.getEvents.map(_.size must_== 0)
+        storage.getFilteredEvents(allEventsRequest).map(_.events.size must_== 0)
       }
     }
   }
@@ -119,6 +123,8 @@ class SqliteStorageSpec extends Specification with EventStorageTimelineSpec with
 }
 
 object SqliteStorageSpec {
+  val allEventsRequest = EventsRequest(List.empty, None, None, None, 1, 100)
+
   def withSqliteStorage[A](maxEvents: Option[Int] = None)(test: SqliteStorage => IO[A]): A = {
     SqliteStorage.inMemory(maxEvents)
       .use(test)

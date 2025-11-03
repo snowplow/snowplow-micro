@@ -55,8 +55,12 @@ private[micro] class SqliteStorage(xa: Transactor[IO], maxEvents: Option[Int]) e
       }
 
       val cleanupProgram = maxEvents.fold(().pure[ConnectionIO]) { limit =>
-        // Only run cleanup with 1% probability to avoid excessive overhead
-        if (Random.nextDouble() < 0.01) {
+        // Probabilistic cleanup to avoid excessive overhead
+        // We want to stay close to the limit, so:
+        //   * For a limit of 100 or less, run every batch
+        //   * For a limit of 10k, run every 100 batches (1%)
+        //   * For a limit of 100k, run every 1000 batches (1%)
+        if (Random.nextDouble() < (100 / limit)) {
           cleanupOldEvents(limit)
         } else {
           ().pure[ConnectionIO]
@@ -75,24 +79,6 @@ private[micro] class SqliteStorage(xa: Transactor[IO], maxEvents: Option[Int]) e
   /** Reset storage by deleting all events. */
   override def reset(): IO[Unit] = {
     (sql"DELETE FROM events".update.run *> sql"DELETE FROM columns".update.run).transact(xa).void
-  }
-
-  /** Get all events as JSON for the /micro/events endpoint. */
-  override def getEvents: IO[List[Json]] = {
-    val query = maxEvents match {
-      case Some(limit) => sql"SELECT event_json FROM events ORDER BY timestamp DESC LIMIT $limit"
-      case None => sql"SELECT event_json FROM events ORDER BY timestamp DESC"
-    }
-
-    query
-      .query[String]
-      .to[List]
-      .transact(xa)
-      .flatMap { jsonStrings =>
-        jsonStrings.traverse { jsonStr =>
-          IO.fromEither(parser.parse(jsonStr))
-        }
-      }
   }
 
   override def getColumns: IO[List[String]] = {
@@ -209,11 +195,15 @@ private[micro] class SqliteStorage(xa: Transactor[IO], maxEvents: Option[Int]) e
       fr"ORDER BY" ++ columnExpr ++ Fragment.const(s" $direction")
     }
 
+    // prevent OOM when an unreasonably large page size is supplied
+    // the UI only uses 50 currently
+    val safePageSize = Math.max(Math.min(request.pageSize, 100), 1)
+
     // Single query with window function to get both data and total count
-    val offset = (request.page - 1) * request.pageSize
+    val offset = (request.page - 1) * safePageSize
     val query = fr"SELECT event_json, COUNT(*) OVER() as total_count FROM events" ++
       whereClause ++ orderByClause ++
-      fr"LIMIT" ++ Fragment.const(request.pageSize.toString) ++
+      fr"LIMIT" ++ Fragment.const(safePageSize.toString) ++
       fr"OFFSET" ++ Fragment.const(offset.toString)
 
     query.query[(String, Int)]
@@ -226,7 +216,7 @@ private[micro] class SqliteStorage(xa: Transactor[IO], maxEvents: Option[Int]) e
         jsonStrings.traverse { jsonStr =>
           IO.fromEither(parser.parse(jsonStr))
         }.map { events =>
-          val totalPages = Math.max(1, (totalItems + request.pageSize - 1) / Math.max(request.pageSize, 1))
+          val totalPages = Math.max(1, (totalItems + safePageSize - 1) / safePageSize)
           EventsResponse(events, totalPages, totalItems)
         }
       }
@@ -299,7 +289,7 @@ private[micro] object SqliteStorage {
           SELECT timestamp
           FROM events
           ORDER BY timestamp DESC
-          LIMIT 1 OFFSET $limit
+          LIMIT 1 OFFSET ${limit-1}
         )
       """.update.run.void
   }

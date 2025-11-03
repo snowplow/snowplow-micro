@@ -80,10 +80,10 @@ private[micro] class InMemoryStorage extends EventStorage {
     }
 
   /** Get all good + incomplete events */
-  def getGoodAndIncomplete: List[GoodEvent] =
+  private def getGoodAndIncomplete: List[GoodEvent] =
     LockGood.synchronized(good)
 
-  override def getEvents: IO[List[Json]] = IO.delay {
+  private def getEvents: IO[List[Json]] = IO.delay {
     getGoodAndIncomplete.map(_.event.toJson(lossy = true))
   }
 

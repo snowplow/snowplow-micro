@@ -19,7 +19,6 @@ trait EventStorage {
   def addToGood(events: List[GoodEvent]): IO[Unit]
   def addToBad(events: List[BadEvent]): IO[Unit]
   def reset(): IO[Unit]
-  def getEvents: IO[List[Json]]
   def getColumns: IO[List[String]]
   def getTimeline: IO[TimelineData]
   def getColumnStats(columns: List[String]): IO[Map[String, ColumnStats]]
@@ -30,7 +29,6 @@ object NoStorage extends EventStorage {
   def addToGood(events: List[GoodEvent]): IO[Unit] = IO.unit
   def addToBad(events: List[BadEvent]): IO[Unit] = IO.unit
   def reset(): IO[Unit] = IO.unit
-  def getEvents: IO[List[Json]] = IO.pure(List.empty)
   def getColumns: IO[List[String]] = IO.pure(List.empty)
   def getTimeline: IO[TimelineData] = IO.pure(TimelineData(List.empty))
   def getColumnStats(columns: List[String]): IO[Map[String, ColumnStats]] = IO.pure(Map.empty)

@@ -39,8 +39,6 @@ sealed trait MicroRoutes[S <: EventStorage] extends Http4sDsl[IO] {
   def commonRoutes: HttpRoutes[IO] = HttpRoutes.of[IO] {
     case (POST | GET) -> Root / "micro" / "reset" =>
       storage.reset().flatMap(_ => Ok("Reset completed"))
-    case GET -> Root / "micro" / "events" =>
-      storage.getEvents.flatMap(events => Ok(events))
     case request @ POST -> Root / "micro" / "events" =>
       request.as[EventsRequest].flatMap { req =>
         storage.getFilteredEvents(req).flatMap(response => Ok(response))
