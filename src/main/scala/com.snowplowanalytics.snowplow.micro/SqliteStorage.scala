@@ -18,24 +18,32 @@ import doobie.hikari.HikariTransactor
 import io.circe.{Json, parser}
 
 import java.sql.Timestamp
+import java.util.concurrent.Executors
+import scala.concurrent.ExecutionContext
 import scala.util.Random
 
-/** SQLite-based event storage that only stores good events for the /micro/events endpoint.
-  * Ignores bad events and only stores the JSON representation of events.
+/** SQLite-based event storage.
+ * Only stores the Analytics SDK JSON representation of valid and failed (incomplete) events.
   */
 private[micro] class SqliteStorage(xa: Transactor[IO], maxEvents: Option[Int]) extends EventStorage {
+  import SqliteStorage._
 
-  /** Add good events to SQLite storage. Only stores the event field as JSON. */
-  def addToGood(events: List[GoodEvent]): IO[Unit] = {
+  /** Add events to SQLite storage. */
+  override def addToGood(events: List[GoodEvent]): IO[Unit] = {
     if (events.nonEmpty) {
-      val inserts = events.map { goodEvent =>
-        val timestamp = Timestamp.from(goodEvent.event.collector_tstamp)
-        val eventId = goodEvent.event.event_id.toString
-        val eventJson = goodEvent.event.toJson(lossy = true).noSpaces
-        sql"INSERT OR IGNORE INTO events (event_id, timestamp, event_json) VALUES ($eventId, $timestamp, $eventJson)"
+      val eventJsons = events.map(_.event.toJson(lossy = true))
+
+      val eventData = events.zip(eventJsons).map { case (goodEvent, eventJson) =>
+        val appId = goodEvent.event.app_id
+        val eventName = goodEvent.event.event_name
+        (goodEvent.event.event_id.toString, Timestamp.from(goodEvent.event.collector_tstamp), eventJson.noSpaces, goodEvent.incomplete, appId, eventName)
       }
 
-      val insertProgram = inserts.traverse(_.update.run).void
+      val insertEventsProgram = {
+        val sql = "INSERT OR IGNORE INTO events (event_id, timestamp, event_json, failed, app_id, event_name) VALUES (?, ?, ?, ?, ?, ?)"
+        Update[(String, Timestamp, String, Boolean, Option[String], Option[String])](sql).updateMany(eventData)
+      }
+
       val cleanupProgram = maxEvents.fold(().pure[ConnectionIO]) { limit =>
         // Only run cleanup with 1% probability to avoid excessive overhead
         if (Random.nextDouble() < 0.01) {
@@ -45,17 +53,17 @@ private[micro] class SqliteStorage(xa: Transactor[IO], maxEvents: Option[Int]) e
         }
       }
 
-      (insertProgram *> cleanupProgram).transact(xa)
+      (insertEventsProgram *> cleanupProgram).transact(xa)
     } else {
       IO.unit
     }
   }
 
   /** Add bad events - ignored in SQLite storage. */
-  def addToBad(events: List[BadEvent]): IO[Unit] = IO.unit
+  override def addToBad(events: List[BadEvent]): IO[Unit] = IO.unit
 
   /** Reset storage by deleting all events. */
-  def reset(): IO[Unit] = {
+  override def reset(): IO[Unit] = {
     sql"DELETE FROM events".update.run.transact(xa).void
   }
 
@@ -77,57 +85,67 @@ private[micro] class SqliteStorage(xa: Transactor[IO], maxEvents: Option[Int]) e
       }
   }
 
-  /** Initialize the storage by creating the table if it doesn't exist. */
-  def initialize(): IO[Unit] = createTableIfNotExists.transact(xa)
 
-  private def createTableIfNotExists: ConnectionIO[Unit] = {
-    sql"""
-      CREATE TABLE IF NOT EXISTS events (
-        event_id TEXT PRIMARY KEY,
-        timestamp TIMESTAMP NOT NULL,
-        event_json JSON NOT NULL
-      )
-    """.update.run.void *>
-    sql"CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp)".update.run.void
-  }
-
-  private def cleanupOldEvents(limit: Int): ConnectionIO[Unit] = {
-    sql"""
-      DELETE FROM events
-      WHERE event_id NOT IN (
-        SELECT event_id FROM events
-        ORDER BY timestamp DESC
-        LIMIT $limit
-      )
-    """.update.run.void
-  }
 }
 
 private[micro] object SqliteStorage {
+  // few threads since SQLite does not support multiple concurrent writes anyway
+  private val databaseExecutionContext = ExecutionContext
+    .fromExecutor(Executors.newFixedThreadPool(2))
 
   /** Create SQLite storage with file-based database. */
   def file(dbPath: String, maxEvents: Option[Int]): Resource[IO, SqliteStorage] = {
     val url = s"jdbc:sqlite:$dbPath"
-    createTransactor(url, maxEvents)
+    create(url, maxEvents)
   }
 
   /** Create SQLite storage with in-memory database. */
   def inMemory(maxEvents: Option[Int]): Resource[IO, SqliteStorage] = {
     val url = "jdbc:sqlite::memory:"
-    createTransactor(url, maxEvents)
+    create(url, maxEvents)
   }
 
-  private def createTransactor(url: String, maxEvents: Option[Int]): Resource[IO, SqliteStorage] = {
-    HikariTransactor.newHikariTransactor[IO](
-      driverClassName = "org.sqlite.JDBC",
-      url = url,
-      user = "", // SQLite doesn't use user/password
-      pass = "",
-      connectEC = scala.concurrent.ExecutionContext.global
-    ).evalTap { xa =>
-      // Initialize the database schema
-      val storage = new SqliteStorage(xa, maxEvents)
-      storage.initialize()
-    }.map(xa => new SqliteStorage(xa, maxEvents))
+  private def create(url: String, maxEvents: Option[Int]): Resource[IO, SqliteStorage] = {
+    for {
+      xa <- HikariTransactor.newHikariTransactor[IO](
+        driverClassName = "org.sqlite.JDBC",
+        url = url,
+        user = "", // SQLite doesn't use user/password
+        pass = "",
+        connectEC = databaseExecutionContext
+      )
+      _ <- Resource.eval(initialize(xa))
+    } yield new SqliteStorage(xa, maxEvents)
+  }
+
+  private def initialize(xa: Transactor[IO]): IO[Unit] = createEventsTable.transact(xa)
+
+  private def createEventsTable: ConnectionIO[Unit] = {
+    sql"""
+      CREATE TABLE IF NOT EXISTS events (
+        event_id TEXT PRIMARY KEY,
+        timestamp TIMESTAMP NOT NULL,
+        event_json JSON NOT NULL,
+        failed BOOLEAN NOT NULL,
+        app_id TEXT,
+        event_name TEXT
+      )
+    """.update.run.void *>
+      sql"CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp)".update.run.void *>
+      sql"CREATE INDEX IF NOT EXISTS idx_events_app_id ON events(app_id)".update.run.void *>
+      sql"CREATE INDEX IF NOT EXISTS idx_events_event_name ON events(event_name)".update.run.void *>
+      sql"CREATE INDEX IF NOT EXISTS idx_events_failed ON events(failed)".update.run.void
+  }
+
+  private def cleanupOldEvents(limit: Int): ConnectionIO[Unit] = {
+    sql"""
+        DELETE FROM events
+        WHERE timestamp < (
+          SELECT timestamp
+          FROM events
+          ORDER BY timestamp DESC
+          LIMIT 1 OFFSET $limit
+        )
+      """.update.run.void
   }
 }

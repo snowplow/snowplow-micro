@@ -59,7 +59,7 @@ object Configuration {
     private val outputJson = Opts.flag("output-json", "Output events in JSON format to standard output or HTTP destination (with a separate key for each schema)", "j").orFalse
     private val destination = Opts.option[Uri]("destination", "HTTP(s) URL to send output data to (requires --output-json or --output-tsv)", "d").orNone
     private val storage = Opts.option[Path]("storage", "Path to an SQLite database file for persistent storage", "s").orNone
-    private val maxEvents = Opts.option[Int]("max-events", "Maximum number of events to store", "m").orNone
+    private val maxEvents = Opts.option[Int]("max-events", "Maximum number of events to store (enforced approximately)", "m").orNone
     private val yauaa = Opts.flag("yauaa", "Enable YAUAA user agent enrichment").orFalse
 
     private val output = (outputTsv, outputJson, destination)

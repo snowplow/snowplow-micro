@@ -26,21 +26,21 @@ private[micro] class InMemoryStorage extends EventStorage {
   private object LockBad
 
   /** Add a good event to the cache. */
-  def addToGood(events: List[GoodEvent]): IO[Unit] = IO.delay {
+  override def addToGood(events: List[GoodEvent]): IO[Unit] = IO.delay {
     LockGood.synchronized {
       good = events ++ good
     }
   }
 
   /** Add a bad event to the cache. */
-  def addToBad(events: List[BadEvent]): IO[Unit] = IO.delay {
+  override def addToBad(events: List[BadEvent]): IO[Unit] = IO.delay {
     LockBad.synchronized {
       bad = events ++ bad
     }
   }
 
   /** Remove all the events from memory. */
-  def reset(): IO[Unit] = IO.delay {
+  override def reset(): IO[Unit] = IO.delay {
     LockGood.synchronized {
       good = List.empty[GoodEvent]
     }

@@ -30,7 +30,7 @@ import org.http4s.dsl.Http4sDsl
 import org.http4s.{HttpRoutes, Response, StaticFile}
 import org.joda.time.DateTime
 
-sealed trait BaseRouting[S <: EventStorage] extends Http4sDsl[IO] {
+sealed trait MicroRoutes[S <: EventStorage] extends Http4sDsl[IO] {
   protected def igluResolver: Resolver[IO]
   protected def storage: S
   protected implicit def lookup: RegistryLookup[IO]
@@ -72,8 +72,8 @@ sealed trait BaseRouting[S <: EventStorage] extends Http4sDsl[IO] {
   }
 }
 
-final class InMemoryRouting(protected val igluResolver: Resolver[IO], protected val storage: InMemoryStorage)
-                           (implicit protected val lookup: RegistryLookup[IO]) extends BaseRouting[InMemoryStorage] {
+final class InMemoryRoutes(protected val igluResolver: Resolver[IO], protected val storage: InMemoryStorage)
+                          (implicit protected val lookup: RegistryLookup[IO]) extends MicroRoutes[InMemoryStorage] {
   private val inMemoryRoutes: HttpRoutes[IO] = HttpRoutes.of[IO] {
     case GET -> Root / "micro" / "events" =>
       Ok(storage.getGoodAndIncomplete.map(_.event.toJson(lossy = true)))
@@ -98,9 +98,9 @@ final class InMemoryRouting(protected val igluResolver: Resolver[IO], protected 
   val routes: HttpRoutes[IO] = commonRoutes <+> inMemoryRoutes
 }
 
-final class SqliteRouting(protected val igluResolver: Resolver[IO],
-                          protected val storage: SqliteStorage)
-                         (implicit protected val lookup: RegistryLookup[IO]) extends BaseRouting[SqliteStorage] {
+final class SqliteRoutes(protected val igluResolver: Resolver[IO],
+                         protected val storage: SqliteStorage)
+                        (implicit protected val lookup: RegistryLookup[IO]) extends MicroRoutes[SqliteStorage] {
   private val sqliteRoutes: HttpRoutes[IO] = HttpRoutes.of[IO] {
     case GET -> Root / "micro" / "events" =>
       storage.getEvents.flatMap(events => Ok(events))
@@ -122,9 +122,9 @@ object Routing {
     storage match {
       case NoStorage => NoRoutes.routes
       case sqliteStorage: SqliteStorage =>
-        new SqliteRouting(config.iglu.resolver, sqliteStorage)(lookup).routes
+        new SqliteRoutes(config.iglu.resolver, sqliteStorage)(lookup).routes
       case inMemoryStorage: InMemoryStorage =>
-        new InMemoryRouting(config.iglu.resolver, inMemoryStorage)(lookup).routes
+        new InMemoryRoutes(config.iglu.resolver, inMemoryStorage)(lookup).routes
     }
   }
 
