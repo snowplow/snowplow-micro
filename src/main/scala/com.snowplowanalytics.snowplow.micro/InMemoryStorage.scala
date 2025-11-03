@@ -10,21 +10,47 @@
 
 package com.snowplowanalytics.snowplow.micro
 
+import cats.effect.IO
+
 /** In-memory cache containing the results of the validation (or not) of the tracking events.
   * Good events are stored with their type, their schema and their contexts, if any,
   * so that they can be quickly filtered.
   * Bad events are stored with the error message(s) describing what when wrong.
   */
-private[micro] class ValidationCache(maxEvents: Option[Int]) {
-  import ValidationCache._
+private[micro] class InMemoryStorage extends EventStorage {
+  import InMemoryStorage._
 
   protected var good = List.empty[GoodEvent]
   private object LockGood
   protected var bad = List.empty[BadEvent]
   private object LockBad
 
+  /** Add a good event to the cache. */
+  override def addToGood(events: List[GoodEvent]): IO[Unit] = IO.delay {
+    LockGood.synchronized {
+      good = events ++ good
+    }
+  }
+
+  /** Add a bad event to the cache. */
+  override def addToBad(events: List[BadEvent]): IO[Unit] = IO.delay {
+    LockBad.synchronized {
+      bad = events ++ bad
+    }
+  }
+
+  /** Remove all the events from memory. */
+  override def reset(): IO[Unit] = IO.delay {
+    LockGood.synchronized {
+      good = List.empty[GoodEvent]
+    }
+    LockBad.synchronized {
+      bad = List.empty[BadEvent]
+    }
+  }
+
   /** Compute a summary with the number of good and bad events currently in cache. */
-  private[micro] def getSummary(): ValidationSummary = {
+  def getSummary(): ValidationSummary = {
     val nbGood = LockGood.synchronized {
       good.filterNot(_.incomplete).size
     }
@@ -34,36 +60,8 @@ private[micro] class ValidationCache(maxEvents: Option[Int]) {
     ValidationSummary(nbGood + nbBad, nbGood, nbBad)
   }
 
-  /** Add a good event to the cache. */
-  private[micro] def addToGood(events: List[GoodEvent]): Unit =
-    LockGood.synchronized {
-      good = maxEvents match {
-        case Some(l) => (events ++ good).take(l)
-        case None => events ++ good
-      }
-    }
-
-  /** Add a bad event to the cache. */
-  private[micro] def addToBad(events: List[BadEvent]): Unit =
-    LockBad.synchronized {
-      bad = maxEvents match {
-        case Some(l) => (events ++ bad).take(l)
-        case None => events ++ bad
-      }
-    }
-
-  /** Remove all the events from memory. */
-  private[micro] def reset(): Unit = {
-    LockGood.synchronized {
-      good = List.empty[GoodEvent]
-    }
-    LockBad.synchronized {
-      bad = List.empty[BadEvent]
-    }
-  }
-
   /** Filter out the good events with the possible filters contained in the HTTP request. */
-  private[micro] def filterGood(
+  def filterGood(
     filtersGood: FiltersGood = FiltersGood(None, None, None, None)
   ): List[GoodEvent] =
     LockGood.synchronized {
@@ -72,11 +70,11 @@ private[micro] class ValidationCache(maxEvents: Option[Int]) {
     }
 
   /** Get all good + incomplete events */
-  private[micro] def getGoodAndIncomplete: List[GoodEvent] =
+  def getGoodAndIncomplete: List[GoodEvent] =
     LockGood.synchronized(good)
 
   /** Filter out the bad events with the possible filters contained in the HTTP request. */
-  private[micro] def filterBad(
+  def filterBad(
     filtersBad: FiltersBad = FiltersBad(None, None, None)
   ): List[BadEvent] =
     LockBad.synchronized {
@@ -85,7 +83,7 @@ private[micro] class ValidationCache(maxEvents: Option[Int]) {
     }
 }
 
-private[micro] object ValidationCache {
+private[micro] object InMemoryStorage {
   /** Check if a good event matches the filters. */
   private[micro] def keepGoodEvent(event: GoodEvent, filters: FiltersGood): Boolean =
     filters.event_type.toSet.subsetOf(event.eventType.toSet) &&

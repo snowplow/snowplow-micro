@@ -76,11 +76,11 @@ class MicroApiSpec extends Specification with CatsEffect {
         _ <- client.run(Request(GET, uri"http://localhost:9090/i?e=pp&p=web&tv=lol&eid=invalidEventId")).use_
         _ <- IO.sleep(1.seconds)
         beforeReset <- client.run(Request(GET, uri"http://localhost:9090/micro/all")).use(_.as[Json])
-        afterReset <- client.run(Request(GET, uri"http://localhost:9090/micro/reset")).use(_.as[Json])
+        afterReset <- client.run(Request(GET, uri"http://localhost:9090/micro/reset")).use(_.as[String])
       } yield {
 
         beforeReset.noSpaces must beEqualTo("""{"total":2,"good":1,"bad":1}""")
-        afterReset.noSpaces must beEqualTo("""{"total":0,"good":0,"bad":0}""")
+        afterReset must beEqualTo("""Reset completed""")
       }
     }
   }
@@ -110,21 +110,6 @@ class MicroApiSpec extends Specification with CatsEffect {
     }
   }
 
-  "Micro with --max-events should limit cache size" in {
-    setupWithArgs(List("--max-events", "2")).use { client =>
-      for {
-        // Send 3 events
-        _ <- client.run(Request(GET, uri"http://localhost:9090/i?e=pp&p=web&tv=event1")).use_
-        _ <- client.run(Request(GET, uri"http://localhost:9090/i?e=pp&p=web&tv=event2")).use_
-        _ <- client.run(Request(GET, uri"http://localhost:9090/i?e=pp&p=web&tv=event3")).use_
-        _ <- IO.sleep(1.seconds)
-        all <- client.run(Request(GET, uri"http://localhost:9090/micro/all")).use(_.as[Json])
-      } yield {
-        // Should only keep 2 events due to rolling cache
-        all.noSpaces must beEqualTo("""{"total":2,"good":2,"bad":0}""")
-      }
-    }
-  }
 
   private def setup(): Resource[IO, Client[IO]] = setupWithArgs(List.empty)
 

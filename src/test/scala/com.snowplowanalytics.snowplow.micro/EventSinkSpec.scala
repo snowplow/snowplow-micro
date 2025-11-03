@@ -13,6 +13,7 @@ package com.snowplowanalytics.snowplow.micro
 import cats.implicits._
 import cats.effect.testing.specs2.CatsResource
 import cats.effect.{IO, Resource}
+import cats.effect.unsafe.implicits.global
 import org.http4s.ember.client.EmberClientBuilder
 import io.circe.JsonObject
 import com.snowplowanalytics.iglu.client.IgluCirceClient
@@ -28,39 +29,42 @@ import org.specs2.mutable.SpecificationLike
 
 import scala.io.Source
 
-class MemorySinkSpec extends CatsResource[IO, MemorySink] with SpecificationLike {
+class EventSinkSpec extends CatsResource[IO, EventSink] with SpecificationLike {
 
   import events._
 
-  override val resource: Resource[IO, MemorySink] = createSink()
+  override val resource: Resource[IO, EventSink] = createSink()
 
   sequential
 
   "processThriftBytes" >> {
     "should add a BadEvent to the cache if the array of bytes is not a valid Thrift payload" >> withResource { sink =>
-      sink.validationCache.reset()
+      val storage = sink.storage.asInstanceOf[InMemoryStorage]
+      storage.reset().unsafeRunSync()
       val bytes = Array(1, 3, 5, 7).map(_.toByte)
       sink.processThriftBytes(bytes).map { _ =>
-        sink.validationCache.filterBad() must beLike { case List(badEvent) if badEvent.errors.exists(_.contains("Can't deserialize Thrift bytes")) => ok }
-        sink.validationCache.filterGood().size must beEqualTo(0)
+        storage.filterBad() must beLike { case List(badEvent) if badEvent.errors.exists(_.contains("Can't deserialize Thrift bytes")) => ok }
+        storage.filterGood().size must beEqualTo(0)
       }
     }
 
     "should add a BadEvent to the cache if RawEvent(s) can't be extracted from the CollectorPayload" >> withResource { sink =>
-      sink.validationCache.reset()
+      val storage = sink.storage.asInstanceOf[InMemoryStorage]
+      storage.reset().unsafeRunSync()
       val bytes = buildThriftBytesBadCollectorPayload()
       sink.processThriftBytes(bytes).map { _ =>
-        sink.validationCache.filterBad() must beLike { case List(badEvent) if badEvent.errors.exists(_.contains("Error while extracting event(s) from collector payload")) => ok }
-        sink.validationCache.filterGood().size must beEqualTo(0)
+        storage.filterBad() must beLike { case List(badEvent) if badEvent.errors.exists(_.contains("Error while extracting event(s) from collector payload")) => ok }
+        storage.filterGood().size must beEqualTo(0)
       }
     }
 
     "should add a GoodEvent and a BadEvent to the cache for a CollectorPayload containing both" >> withResource { sink =>
-      sink.validationCache.reset()
+      val storage = sink.storage.asInstanceOf[InMemoryStorage]
+      storage.reset().unsafeRunSync()
       val bytes = buildThriftBytes1Good1Bad()
       sink.processThriftBytes(bytes).map { _ =>
-        sink.validationCache.filterBad() must beLike { case List(badEvent) if badEvent.errors.exists(_.contains("Error while validating the event")) => ok }
-        sink.validationCache.filterGood().size must beEqualTo(1)
+        storage.filterBad() must beLike { case List(badEvent) if badEvent.errors.exists(_.contains("Error while validating the event")) => ok }
+        storage.filterGood().size must beEqualTo(1)
       }
     }
   }
@@ -157,7 +161,7 @@ class MemorySinkSpec extends CatsResource[IO, MemorySink] with SpecificationLike
     }
   }
 
-  private def createSink(): Resource[IO, MemorySink] = {
+  private def createSink(): Resource[IO, EventSink] = {
     for {
       enrichConfig <- Resource.eval(Configuration.loadEnrichConfig().value.map(_.getOrElse(throw new IllegalArgumentException("Can't read defaults from Enrich config"))))
       igluClient <- Resource.eval(IgluCirceClient.fromResolver[IO](Resolver[IO](List(Registry.IgluCentral), None), 500, enrichConfig.maxJsonDepth))
@@ -166,8 +170,8 @@ class MemorySinkSpec extends CatsResource[IO, MemorySink] with SpecificationLike
       processor = Processor(BuildInfo.name, BuildInfo.version)
       lookup = JavaNetRegistryLookup.ioLookupInstance[IO]
       httpClient <- EmberClientBuilder.default[IO].build
-      validationCache = new ValidationCache(None)
-    } yield new MemorySink(igluClient, lookup, enrichmentRegistry, OutputFormat.None, None, processor, enrichConfig, httpClient, validationCache)
+      storage = new InMemoryStorage()
+    } yield new EventSink(igluClient, lookup, enrichmentRegistry, OutputFormat.None, None, processor, enrichConfig, httpClient, storage)
   }
 
   private def buildJSEnrichment(): IO[JavascriptScriptEnrichment] = {

@@ -10,6 +10,7 @@
 
 package com.snowplowanalytics.snowplow.micro
 
+import cats.effect.unsafe.implicits.global
 import org.specs2.mutable.Specification
 import org.joda.time.DateTime
 
@@ -19,8 +20,8 @@ import com.snowplowanalytics.snowplow.analytics.scalasdk.Event
 import java.util.UUID
 import java.time.Instant
 
-class ValidationCacheSpec extends Specification {
-  import ValidationCacheSpec._
+class InMemoryStorageSpec extends Specification {
+  import InMemoryStorageSpec._
 
   "getSummary" >> {
     "should return the correct number of bad and good events" >> {
@@ -51,7 +52,7 @@ class ValidationCacheSpec extends Specification {
   "addToGood" >> {
     "should succesfully add one good event to an empty cache" >> {
       val cache = emptyCache()
-      cache.addToGood(List(GoodEvent1))
+      cache.addToGood(List(GoodEvent1)).unsafeRunSync()
 
       cache.getSummary().good must_== 1
       cache.getSummary().bad must_== 0
@@ -60,7 +61,7 @@ class ValidationCacheSpec extends Specification {
 
     "should succesfully add several good events to an empty cache" >> {
       val cache = emptyCache()
-      cache.addToGood(List(GoodEvent1, GoodEvent2))
+      cache.addToGood(List(GoodEvent1, GoodEvent2)).unsafeRunSync()
 
       cache.getSummary().good must_== 2
       cache.getSummary().bad must_== 0
@@ -69,51 +70,19 @@ class ValidationCacheSpec extends Specification {
 
     "should succesfully add good events to a non empty cache" >> {
       val cache = cacheOf(List(GoodEvent1), Nil)
-      cache.addToGood(List(GoodEvent2))
+      cache.addToGood(List(GoodEvent2)).unsafeRunSync()
 
       cache.getSummary().good must_== 2
       cache.getSummary().bad must_== 0
       cache.filterGood() must contain(exactly(GoodEvent1, GoodEvent2))
     }
 
-    "should respect the limit when adding events" >> {
-      val cache = new ValidationCache(Some(1))
-      cache.addToGood(List(GoodEvent1, GoodEvent2))
-
-      cache.getSummary().good must_== 1
-      cache.filterGood() must contain(exactly(GoodEvent1))
-    }
-
-    "should implement rolling behavior when limit is exceeded" >> {
-      val cache = new ValidationCache(Some(1))
-      cache.addToGood(List(GoodEvent1))
-      cache.addToGood(List(GoodEvent2))
-
-      cache.getSummary().good must_== 1
-      cache.filterGood() must contain(exactly(GoodEvent2))
-    }
-
-    "should maintain FIFO order with rolling cache" >> {
-      val cache = new ValidationCache(Some(2))
-      cache.addToGood(List(GoodEvent1))
-      cache.addToGood(List(GoodEvent2))
-
-      cache.getSummary().good must_== 2
-      cache.filterGood() must contain(exactly(GoodEvent1, GoodEvent2))
-
-      // Add third event, should drop the first (GoodEvent1)
-      val GoodEvent3 = GoodEvent1.copy(eventType = Some("type3"))
-      cache.addToGood(List(GoodEvent3))
-
-      cache.getSummary().good must_== 2
-      cache.filterGood() must contain(exactly(GoodEvent2, GoodEvent3))
-    }
   }
 
   "addToBad" >> {
     "should succesfully add one bad event to an empty cache" >> {
       val cache = emptyCache()
-      cache.addToBad(List(BadEvent1))
+      cache.addToBad(List(BadEvent1)).unsafeRunSync()
 
       cache.getSummary().good must_== 0
       cache.getSummary().bad must_== 1
@@ -122,7 +91,7 @@ class ValidationCacheSpec extends Specification {
 
     "should succesfully add several bad events to an empty cache" >> {
       val cache = emptyCache()
-      cache.addToBad(List(BadEvent1, BadEvent2))
+      cache.addToBad(List(BadEvent1, BadEvent2)).unsafeRunSync()
 
       cache.getSummary().good must_== 0
       cache.getSummary().bad must_== 2
@@ -131,35 +100,19 @@ class ValidationCacheSpec extends Specification {
 
     "should succesfully add bad events to a non empty cache" >> {
       val cache = cacheOf(Nil, List(BadEvent1))
-      cache.addToBad(List(BadEvent2))
+      cache.addToBad(List(BadEvent2)).unsafeRunSync()
 
       cache.getSummary().good must_== 0
       cache.getSummary().bad must_== 2
       cache.filterBad() must contain(exactly(BadEvent1, BadEvent2))
     }
 
-    "should respect the limit when adding bad events" >> {
-      val cache = new ValidationCache(Some(1))
-      cache.addToBad(List(BadEvent1, BadEvent2))
-
-      cache.getSummary().bad must_== 1
-      cache.filterBad() must contain(exactly(BadEvent1))
-    }
-
-    "should implement rolling behavior for bad events when limit is exceeded" >> {
-      val cache = new ValidationCache(Some(1))
-      cache.addToBad(List(BadEvent1))
-      cache.addToBad(List(BadEvent2))
-
-      cache.getSummary().bad must_== 1
-      cache.filterBad() must contain(exactly(BadEvent2))
-    }
   }
 
   "reset" >> {
     "should remove all the good and bad events from the cache" >> {
       val cache = cacheOf(List(GoodEvent1), List(BadEvent1))
-      cache.reset()
+      cache.reset().unsafeRunSync()
       cache.getSummary().good must_== 0
       cache.getSummary().bad must_== 0
     }
@@ -220,8 +173,8 @@ class ValidationCacheSpec extends Specification {
 
     "should return the most recent events if limit is set" >> {
       val cache = emptyCache()
-      cache.addToGood(List(GoodEvent1))
-      cache.addToGood(List(GoodEvent2)) // most recent
+      cache.addToGood(List(GoodEvent1)).unsafeRunSync()
+      cache.addToGood(List(GoodEvent2)).unsafeRunSync() // most recent
 
       val filter = EmptyFilterGood.copy(limit = Some(1))
       cache.filterGood(filter) must contain(exactly(GoodEvent2))
@@ -233,24 +186,24 @@ class ValidationCacheSpec extends Specification {
       val shouldKeep = EmptyFilterGood.copy(event_type = GoodEvent1.eventType)
       val shouldNotKeep = EmptyFilterGood.copy(event_type = GoodEvent2.eventType)
 
-      ValidationCache.keepGoodEvent(GoodEvent1, shouldKeep) should beTrue
-      ValidationCache.keepGoodEvent(GoodEvent1, shouldNotKeep) should beFalse
+      InMemoryStorage.keepGoodEvent(GoodEvent1, shouldKeep) should beTrue
+      InMemoryStorage.keepGoodEvent(GoodEvent1, shouldNotKeep) should beFalse
     }
 
     "should correctly return true or false if the filter contains only a schema and it matches" >> {
       val shouldKeep = EmptyFilterGood.copy(schema = GoodEvent1.schema)
       val shouldNotKeep = EmptyFilterGood.copy(schema = GoodEvent2.schema)
 
-      ValidationCache.keepGoodEvent(GoodEvent1, shouldKeep) should beTrue
-      ValidationCache.keepGoodEvent(GoodEvent1, shouldNotKeep) should beFalse
+      InMemoryStorage.keepGoodEvent(GoodEvent1, shouldKeep) should beTrue
+      InMemoryStorage.keepGoodEvent(GoodEvent1, shouldNotKeep) should beFalse
     }
 
     "should correctly return true or false if the filter contains only contexts and it matches" >> {
       val shouldKeep = EmptyFilterGood.copy(contexts = Some(GoodEvent1.contexts))
       val shouldNotKeep = EmptyFilterGood.copy(contexts = Some(GoodEvent2.contexts))
 
-      ValidationCache.keepGoodEvent(GoodEvent1, shouldKeep) should beTrue
-      ValidationCache.keepGoodEvent(GoodEvent1, shouldNotKeep) should beFalse
+      InMemoryStorage.keepGoodEvent(GoodEvent1, shouldKeep) should beTrue
+      InMemoryStorage.keepGoodEvent(GoodEvent1, shouldNotKeep) should beFalse
     }
 
     "should correctly return true or false if several filters are set at the same time" >> {
@@ -259,24 +212,24 @@ class ValidationCacheSpec extends Specification {
       val shouldNotKeep2 = FiltersGood(GoodEvent1.eventType, Some("nonsense"), Some(GoodEvent1.contexts), None)
       val shouldNotKeep3 = FiltersGood(GoodEvent1.eventType, GoodEvent1.schema, Some(List("nonsense")), None)
 
-      ValidationCache.keepGoodEvent(GoodEvent1, shouldKeep) should beTrue
-      ValidationCache.keepGoodEvent(GoodEvent1, shouldNotKeep1) should beFalse
-      ValidationCache.keepGoodEvent(GoodEvent1, shouldNotKeep2) should beFalse
-      ValidationCache.keepGoodEvent(GoodEvent1, shouldNotKeep3) should beFalse
+      InMemoryStorage.keepGoodEvent(GoodEvent1, shouldKeep) should beTrue
+      InMemoryStorage.keepGoodEvent(GoodEvent1, shouldNotKeep1) should beFalse
+      InMemoryStorage.keepGoodEvent(GoodEvent1, shouldNotKeep2) should beFalse
+      InMemoryStorage.keepGoodEvent(GoodEvent1, shouldNotKeep3) should beFalse
     }
   }
 
   "containsAllContext" >> {
     "should return true if the event contains exactly the same contexts" >> {
-      ValidationCache.containsAllContexts(GoodEvent1, GoodEvent1.contexts) should beTrue
+      InMemoryStorage.containsAllContexts(GoodEvent1, GoodEvent1.contexts) should beTrue
     }
 
     "should return true if the event contains the same contexts and more" >> {
-      ValidationCache.containsAllContexts(GoodEvent1, GoodEvent1.contexts.tail) should beTrue
+      InMemoryStorage.containsAllContexts(GoodEvent1, GoodEvent1.contexts.tail) should beTrue
     }
 
     "should return true if list of contexts in the filter is empty" >> {
-      ValidationCache.containsAllContexts(GoodEvent1, Nil) should beTrue
+      InMemoryStorage.containsAllContexts(GoodEvent1, Nil) should beTrue
     }
   }
 
@@ -307,8 +260,8 @@ class ValidationCacheSpec extends Specification {
 
     "should return the most recent events if limit is set" >> {
       val cache = emptyCache()
-      cache.addToBad(List(BadEvent1))
-      cache.addToBad(List(BadEvent2)) // most recent
+      cache.addToBad(List(BadEvent1)).unsafeRunSync()
+      cache.addToBad(List(BadEvent2)).unsafeRunSync() // most recent
 
       val filter = EmptyFilterBad.copy(limit = Some(1))
       cache.filterBad(filter) must contain(exactly(BadEvent2))
@@ -320,16 +273,16 @@ class ValidationCacheSpec extends Specification {
       val shouldKeep = EmptyFilterBad.copy(vendor = Some(CollectorPayload1.api.vendor))
       val shouldNotKeep = EmptyFilterBad.copy(vendor = Some(CollectorPayload2.api.vendor))
 
-      ValidationCache.keepBadEvent(BadEvent1, shouldKeep) should beTrue
-      ValidationCache.keepBadEvent(BadEvent1, shouldNotKeep) should beFalse
+      InMemoryStorage.keepBadEvent(BadEvent1, shouldKeep) should beTrue
+      InMemoryStorage.keepBadEvent(BadEvent1, shouldNotKeep) should beFalse
     }
 
     "should correctly filter out based on the version" >> {
       val shouldKeep = EmptyFilterBad.copy(version = Some(CollectorPayload1.api.version))
       val shouldNotKeep = EmptyFilterBad.copy(version = Some(CollectorPayload2.api.version))
 
-      ValidationCache.keepBadEvent(BadEvent1, shouldKeep) should beTrue
-      ValidationCache.keepBadEvent(BadEvent1, shouldNotKeep) should beFalse
+      InMemoryStorage.keepBadEvent(BadEvent1, shouldKeep) should beTrue
+      InMemoryStorage.keepBadEvent(BadEvent1, shouldNotKeep) should beFalse
     }
 
     "should correctly filter out based on the vendor and the version at the same time" >> {
@@ -337,28 +290,28 @@ class ValidationCacheSpec extends Specification {
       val shouldNotKeep1 = FiltersBad(Some("nonsense"), Some(CollectorPayload1.api.version), None)
       val shouldNotKeep2 = FiltersBad(Some(CollectorPayload1.api.vendor), Some("nonsense"), None)
 
-      ValidationCache.keepBadEvent(BadEvent1, shouldKeep) should beTrue
-      ValidationCache.keepBadEvent(BadEvent1, shouldNotKeep1) should beFalse
-      ValidationCache.keepBadEvent(BadEvent1, shouldNotKeep2) should beFalse
+      InMemoryStorage.keepBadEvent(BadEvent1, shouldKeep) should beTrue
+      InMemoryStorage.keepBadEvent(BadEvent1, shouldNotKeep1) should beFalse
+      InMemoryStorage.keepBadEvent(BadEvent1, shouldNotKeep2) should beFalse
     }
   }
 }
 
-object ValidationCacheSpec {
+object InMemoryStorageSpec {
 
   val EmptyFilterGood: FiltersGood = FiltersGood(None, None, None, None)
   val EmptyFilterBad: FiltersBad = FiltersBad(None, None, None)
 
   val testTimestamp = DateTime.parse("2014-01-16T00:49:58.278+00:00")
 
-  def cacheOf(goodInit: List[GoodEvent], badInit: List[BadEvent]): ValidationCache = {
-    val cache = new ValidationCache(None)
-    cache.addToGood(goodInit)
-    cache.addToBad(badInit)
-    cache
+  def cacheOf(goodInit: List[GoodEvent], badInit: List[BadEvent]): InMemoryStorage = {
+    val storage = new InMemoryStorage()
+    storage.addToGood(goodInit).unsafeRunSync()
+    storage.addToBad(badInit).unsafeRunSync()
+    storage
   }
 
-  def emptyCache(): ValidationCache =
+  def emptyCache(): InMemoryStorage =
     cacheOf(Nil, Nil)
 
   val GoodEvent1: GoodEvent =
@@ -367,7 +320,7 @@ object ValidationCacheSpec {
       Some("type1"),
       Some("com.snowplowanalytics.example1"),
       List("com.snowplowanalytics.context1a", "com.snowplowanalytics.context1b"),
-      Event.minimal(UUID.randomUUID, Instant.now, "collector1", "etl1")
+      Event.minimal(UUID.randomUUID, Instant.ofEpochSecond(1761686664), "collector1", "etl1")
     )
 
   val GoodEvent2: GoodEvent =
@@ -376,7 +329,16 @@ object ValidationCacheSpec {
       Some("type2"),
       Some("com.snowplowanalytics.example2"),
       List("com.snowplowanalytics.context2a", "com.snowplowanalytics.context2b"),
-      Event.minimal(UUID.randomUUID, Instant.now, "collector1", "etl1")
+      Event.minimal(UUID.randomUUID, Instant.ofEpochSecond(1761686665), "collector1", "etl1")
+    )
+
+  val GoodEvent3: GoodEvent =
+    GoodEvent(
+      events.buildRawEvent(),
+      Some("type3"),
+      Some("com.snowplowanalytics.example3"),
+      List("com.snowplowanalytics.context3a"),
+      Event.minimal(UUID.randomUUID, Instant.ofEpochSecond(1761686666), "collector1", "etl1")
     )
 
   val CollectorPayload1: CollectorPayload =

@@ -17,7 +17,11 @@ import com.monovore.decline.effect.CommandIOApp
 object Main
   extends CommandIOApp(
     name = s"docker run ${BuildInfo.dockerAlias}",
-    header = "MICRO",
+    header =
+      s"""Notes:
+         |    - With --storage and/or --max-events, only the /micro/events data endpoint is supported.
+         |        Other data API endpoints (/micro/all, /micro/good and /micro/bad) are not available.
+         |    - With --max-events set to 0, all /micro/* API endpoints are disabled.""".stripMargin,
     version = BuildInfo.version
   ) {
   override def main: Opts[IO[ExitCode]] = Run.run()
