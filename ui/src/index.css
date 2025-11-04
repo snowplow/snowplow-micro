@@ -89,12 +89,8 @@ body {
 
 /* Loading gradient border animation */
 @keyframes gradient-loading {
-  0% { background-position: 120% 50%; }
-  100% { background-position: -120% 50%; }
-}
-
-.gradient-loading-border {
-  position: relative;
+  0% { background-position: 130% 50%; }
+  100% { background-position: -30% 50%; }
 }
 
 .gradient-loading-border::after {
@@ -112,6 +108,6 @@ body {
     hsl(var(--border)) 100%
   );
   background-size: 200% 100%;
-  animation: gradient-loading 1s ease-in-out infinite;
+  animation: gradient-loading 1.5s ease-in-out infinite;
   z-index: 1;
 }
