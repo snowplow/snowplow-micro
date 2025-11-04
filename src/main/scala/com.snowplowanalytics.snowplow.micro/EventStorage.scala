@@ -13,6 +13,9 @@ package com.snowplowanalytics.snowplow.micro
 import cats.effect.{IO, Resource}
 import com.snowplowanalytics.snowplow.micro.Configuration.MicroConfig
 import io.circe.Json
+
+import java.time.Instant
+import java.time.temporal.ChronoUnit
 import scala.collection.mutable
 
 trait EventStorage {
@@ -49,17 +52,13 @@ object EventStorage {
     }
   }
 
-  def roundToMinute(timestamp: Long): Long = {
-    (timestamp / 60000) * 60000
-  }
-
   def fillMissingMinutes(points: List[TimelinePoint]): List[TimelinePoint] = {
     // the first point is the latest one
-    val latestTime = points.headOption.fold(roundToMinute(System.currentTimeMillis()))(_.timestamp)
-    val startTime = latestTime - 30 * 60000
+    val latestTime = points.headOption.fold(Instant.now().truncatedTo(ChronoUnit.MINUTES))(_.timestamp)
     val pointMap = points.map(p => p.timestamp -> p).toMap
 
-    (latestTime to startTime by -60000).toList.map { minute =>
+    (0L to 30L).toList.map { delta =>
+      val minute = latestTime.minus(delta, ChronoUnit.MINUTES)
       pointMap.getOrElse(minute, TimelinePoint(0, 0, minute))
     }
   }

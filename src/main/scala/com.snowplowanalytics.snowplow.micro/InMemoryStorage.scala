@@ -13,6 +13,8 @@ package com.snowplowanalytics.snowplow.micro
 import cats.effect.IO
 import io.circe.Json
 
+import java.time.temporal.ChronoUnit
+
 /** In-memory cache containing the results of the validation (or not) of the tracking events.
   * Good events are stored with their type, their schema and their contexts, if any,
   * so that they can be quickly filtered.
@@ -98,7 +100,7 @@ private[micro] class InMemoryStorage extends EventStorage {
 
   override def getTimeline: IO[TimelineData] = IO.delay {
     val groupedByMinute = LockGood.synchronized {
-      good.groupBy(event => EventStorage.roundToMinute(event.event.collector_tstamp.toEpochMilli))
+      good.groupBy(event => event.event.collector_tstamp.truncatedTo(ChronoUnit.MINUTES))
         .map {
           case (minute, events) =>
             val (failed, valid) = events.partition(_.incomplete)
@@ -217,9 +219,9 @@ private[micro] object InMemoryStorage {
   }
 
   private[micro] def applyTimeFilter(goodEvent: GoodEvent, timeRange: TimeRange): Boolean = {
-    val timestamp = goodEvent.event.collector_tstamp.toEpochMilli
-    val afterStart = timeRange.start.forall(start => timestamp >= start)
-    val beforeEnd = timeRange.end.forall(end => timestamp < end)
+    val timestamp = goodEvent.event.collector_tstamp
+    val afterStart = timeRange.start.forall(start => timestamp.compareTo(start) >= 0)
+    val beforeEnd = timeRange.end.forall(end => timestamp.compareTo(end) < 0)
     afterStart && beforeEnd
   }
 

@@ -17,6 +17,8 @@ import org.specs2.specification.core.Fragment
 import io.circe.Json
 import io.circe.parser.parse
 
+import java.time.temporal.ChronoUnit
+
 class EventStorageSpec extends Specification {
   "extractColumnsFromEvent" >> {
     "should extract top-level column names" >> {
@@ -208,8 +210,8 @@ trait EventStorageTimelineSpec {
             val pointsWithEvents = timeline.points.filter(p => p.validEvents > 0 || p.failedEvents > 0)
             pointsWithEvents must have size(2) // GoodEvent1 & GoodEvent2 in same minute, GoodEvent3 in different minute
 
-            val eventMinute12 = EventStorage.roundToMinute(GoodEvent1.event.collector_tstamp.toEpochMilli)
-            val eventMinute3 = EventStorage.roundToMinute(GoodEvent3.event.collector_tstamp.toEpochMilli)
+            val eventMinute12 = GoodEvent1.event.collector_tstamp.truncatedTo(ChronoUnit.MINUTES)
+            val eventMinute3 = GoodEvent3.event.collector_tstamp.truncatedTo(ChronoUnit.MINUTES)
 
             val minute12Point = pointsWithEvents.find(_.timestamp == eventMinute12)
             val minute3Point = pointsWithEvents.find(_.timestamp == eventMinute3)
@@ -238,8 +240,8 @@ trait EventStorageTimelineSpec {
             val pointsWithEvents = timeline.points.filter(p => p.validEvents > 0 || p.failedEvents > 0)
             pointsWithEvents must have size(2)
 
-            val eventMinute12 = EventStorage.roundToMinute(GoodEvent1.event.collector_tstamp.toEpochMilli)
-            val eventMinute3 = EventStorage.roundToMinute(failedEvent.event.collector_tstamp.toEpochMilli)
+            val eventMinute12 = GoodEvent1.event.collector_tstamp.truncatedTo(ChronoUnit.MINUTES)
+            val eventMinute3 = failedEvent.event.collector_tstamp.truncatedTo(ChronoUnit.MINUTES)
 
             val minute12Point = pointsWithEvents.find(_.timestamp == eventMinute12)
             val minute3Point = pointsWithEvents.find(_.timestamp == eventMinute3)
@@ -263,7 +265,7 @@ trait EventStorageTimelineSpec {
             timeline <- storage.getTimeline
           } yield {
             timeline.points must have size(31)
-            timeline.points.map(_.timestamp) must beSorted(Ordering.Long.reverse)
+            timeline.points.map(_.timestamp.toEpochMilli) must beSorted(Ordering.Long.reverse)
           }
         }.unsafeRunSync()
       }
@@ -419,8 +421,8 @@ trait EventStorageFilteredEventsSpec {
         storageResource.use { storage =>
           for {
             _ <- storage.addToGood(List(GoodEvent1, GoodEvent2, GoodEvent3))
-            startTime = GoodEvent1.event.collector_tstamp.toEpochMilli
-            endTime = GoodEvent3.event.collector_tstamp.toEpochMilli
+            startTime = GoodEvent1.event.collector_tstamp
+            endTime = GoodEvent3.event.collector_tstamp
             timeRange = TimeRange(Some(startTime), Some(endTime))
             request = EventsRequest(List.empty, None, Some(timeRange), None, 1, 10)
             result <- storage.getFilteredEvents(request)

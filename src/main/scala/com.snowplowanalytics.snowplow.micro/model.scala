@@ -15,6 +15,8 @@ import com.snowplowanalytics.snowplow.enrich.common.loaders.CollectorPayload
 import com.snowplowanalytics.snowplow.analytics.scalasdk.Event
 import io.circe.Json
 
+import java.time.Instant
+
 /** A list of this case class is returned when /micro/good is queried. */
 final case class GoodEvent(
   rawEvent: RawEvent,
@@ -51,7 +53,7 @@ private [micro] final case class FiltersBad(
 private [micro] final case class ValidationSummary(total: Int, good: Int, bad: Int)
 
 /** Timeline data structures for /micro/timeline endpoint. */
-final case class TimelinePoint(validEvents: Int, failedEvents: Int, timestamp: Long)
+final case class TimelinePoint(validEvents: Int, failedEvents: Int, timestamp: Instant)
 final case class TimelineData(points: List[TimelinePoint])
 
 /** Column statistics data structures for /micro/columnStats endpoint. */
@@ -73,7 +75,7 @@ final case class EventsRequest(
   pageSize: Int
 )
 
-final case class TimeRange(start: Option[Long], end: Option[Long])
+final case class TimeRange(start: Option[Instant], end: Option[Instant])
 
 final case class EventsSorting(column: String, desc: Boolean)
 

@@ -30,6 +30,8 @@ import org.http4s.dsl.Http4sDsl
 import org.http4s.{HttpRoutes, Response, StaticFile}
 import org.joda.time.DateTime
 
+import java.time.Instant
+
 sealed trait MicroRoutes[S <: EventStorage] extends Http4sDsl[IO] {
   protected def igluResolver: Resolver[IO]
   protected def storage: S
@@ -148,6 +150,12 @@ object Routing {
 
   implicit val dateTimeEncoder: Encoder[DateTime] =
     Encoder[String].contramap(_.toString)
+
+  implicit val instantEncoder: Encoder[Instant] =
+    Encoder[Long].contramap(_.toEpochMilli)
+
+  implicit val instantDecoder: Decoder[Instant] =
+    Decoder[Long].map(Instant.ofEpochMilli)
 
   implicit val nameValuePairEncoder: Encoder[NameValuePair] =
     Encoder[String].contramap(kv => s"${kv.getName}=${kv.getValue}")

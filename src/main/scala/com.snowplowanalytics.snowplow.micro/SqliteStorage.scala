@@ -15,9 +15,10 @@ import cats.implicits._
 import doobie._
 import doobie.implicits._
 import doobie.hikari.HikariTransactor
-import io.circe.{Json, parser}
+import io.circe.parser
 
 import java.sql.Timestamp
+import java.time.Instant
 import java.util.concurrent.Executors
 import scala.concurrent.ExecutionContext
 import scala.util.Random
@@ -36,7 +37,7 @@ private[micro] class SqliteStorage(xa: Transactor[IO], maxEvents: Option[Int]) e
       val eventData = events.zip(eventJsons).map { case (goodEvent, eventJson) =>
         val appId = goodEvent.event.app_id
         val eventName = goodEvent.event.event_name
-        (goodEvent.event.event_id.toString, Timestamp.from(goodEvent.event.collector_tstamp), eventJson.noSpaces, goodEvent.incomplete, appId, eventName)
+        (goodEvent.event.event_id.toString, goodEvent.event.collector_tstamp, eventJson.noSpaces, goodEvent.incomplete, appId, eventName)
       }
 
       val allColumns = eventJsons.map(EventStorage.extractColumnsFromEvent)
@@ -44,7 +45,7 @@ private[micro] class SqliteStorage(xa: Transactor[IO], maxEvents: Option[Int]) e
 
       val insertEventsProgram = {
         val sql = "INSERT OR IGNORE INTO events (event_id, timestamp, event_json, failed, app_id, event_name) VALUES (?, ?, ?, ?, ?, ?)"
-        Update[(String, Timestamp, String, Boolean, Option[String], Option[String])](sql).updateMany(eventData)
+        Update[(String, Instant, String, Boolean, Option[String], Option[String])](sql).updateMany(eventData)
       }
 
       val insertColumnsProgram = if (allColumns.nonEmpty) {
@@ -134,7 +135,7 @@ private[micro] class SqliteStorage(xa: Transactor[IO], maxEvents: Option[Int]) e
           fr"SELECT DISTINCT" ++ Fragment.const(column) ++ fr"as value FROM events" ++
             fr"WHERE value IS NOT NULL LIMIT 20"
         case _ =>
-          fr"SELECT DISTINCT event_json->>" ++ Fragment.const("'" + column + "'") ++ fr"as value FROM events" ++
+          fr"SELECT DISTINCT event_json->>" ++ Fragment.const("'" + column.replace("'", "") + "'") ++ fr"as value FROM events" ++
             fr"WHERE value IS NOT NULL AND value != 'null' LIMIT 20"
       }
 
@@ -156,10 +157,10 @@ private[micro] class SqliteStorage(xa: Transactor[IO], maxEvents: Option[Int]) e
       },
       // Time range filter
       request.timeRange.flatMap(_.start).map { start =>
-        fr"AND timestamp >=" ++ Fragment.const(start.toString)
+        fr"AND timestamp >= $start"
       },
       request.timeRange.flatMap(_.end).map { end =>
-        fr"AND timestamp <" ++ Fragment.const(end.toString)
+        fr"AND timestamp < $end"
       }
     ).flatten
 
@@ -167,12 +168,12 @@ private[micro] class SqliteStorage(xa: Transactor[IO], maxEvents: Option[Int]) e
     val columnFilters = request.filters
       .filterNot(f => EventStorage.isComplexColumn(f.column))
       .map { filter =>
+        val like = fr"LIKE ${"%" + filter.value + "%"}"
         filter.column match {
           case "event_id" | "app_id" | "event_name" =>
-            fr"AND" ++ Fragment.const(filter.column) ++ fr"LIKE" ++ Fragment.const("'%" + filter.value + "%'")
+            fr"AND" ++ Fragment.const(filter.column) ++ like
           case _ =>
-            fr"AND event_json->>" ++ Fragment.const("'" + filter.column + "'") ++
-              fr"LIKE" ++ Fragment.const("'%" + filter.value + "%'")
+            fr"AND event_json->>" ++ Fragment.const("'" + filter.column.replace("'", "") + "'") ++ like
         }
       }
 
@@ -189,7 +190,7 @@ private[micro] class SqliteStorage(xa: Transactor[IO], maxEvents: Option[Int]) e
         case "event_id" | "app_id" | "event_name" =>
           Fragment.const(sorting.column)
         case _ =>
-          fr"event_json->>" ++ Fragment.const("'" + sorting.column + "'")
+          fr"event_json->>" ++ Fragment.const("'" + sorting.column.replace("'", "") + "'")
       }
       val direction = if (sorting.desc) "DESC" else "ASC"
       fr"ORDER BY" ++ columnExpr ++ Fragment.const(s" $direction")
@@ -203,8 +204,7 @@ private[micro] class SqliteStorage(xa: Transactor[IO], maxEvents: Option[Int]) e
     val offset = (request.page - 1) * safePageSize
     val query = fr"SELECT event_json, COUNT(*) OVER() as total_count FROM events" ++
       whereClause ++ orderByClause ++
-      fr"LIMIT" ++ Fragment.const(safePageSize.toString) ++
-      fr"OFFSET" ++ Fragment.const(offset.toString)
+      fr"LIMIT ${safePageSize} OFFSET ${offset}"
 
     query.query[(String, Int)]
       .to[List]
@@ -294,8 +294,11 @@ private[micro] object SqliteStorage {
       """.update.run.void
   }
 
+  implicit val instantEpochMeta: Meta[Instant] =
+    Meta[Timestamp].timap(_.toInstant)(Timestamp.from)
+
   implicit val timelinePointRead: Read[TimelinePoint] =
-    Read[(Long, Int, Int)].map { case (timestamp, validEvents, failedEvents) =>
+    Read[(Instant, Int, Int)].map { case (timestamp, validEvents, failedEvents) =>
       TimelinePoint(validEvents, failedEvents, timestamp)
     }
 }
