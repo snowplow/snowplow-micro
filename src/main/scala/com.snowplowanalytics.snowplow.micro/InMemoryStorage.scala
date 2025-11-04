@@ -160,7 +160,7 @@ private[micro] class InMemoryStorage extends EventStorage {
       val sortedEvents = request.sorting match {
         case Some(sorting) if !EventStorage.isComplexColumn(sorting.column) =>
           applySorting(filteredEvents, sorting)
-        case None => filteredEvents
+        case _ => filteredEvents
       }
 
       val totalItems = sortedEvents.size
