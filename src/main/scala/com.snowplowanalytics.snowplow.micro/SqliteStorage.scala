@@ -135,7 +135,7 @@ private[micro] class SqliteStorage(xa: Transactor[IO], maxEvents: Option[Int]) e
           fr"SELECT DISTINCT" ++ Fragment.const(column) ++ fr"as value FROM events" ++
             fr"WHERE value IS NOT NULL LIMIT 20"
         case _ =>
-          fr"SELECT DISTINCT event_json->>" ++ Fragment.const("'" + column.replace("'", "") + "'") ++ fr"as value FROM events" ++
+          fr"SELECT DISTINCT CAST(json_extract(event_json, ${"$." + column}) AS TEXT) as value FROM events" ++
             fr"WHERE value IS NOT NULL AND value != 'null' LIMIT 20"
       }
 
@@ -173,7 +173,7 @@ private[micro] class SqliteStorage(xa: Transactor[IO], maxEvents: Option[Int]) e
           case "event_id" | "app_id" | "event_name" =>
             fr"AND" ++ Fragment.const(filter.column) ++ like
           case _ =>
-            fr"AND event_json->>" ++ Fragment.const("'" + filter.column.replace("'", "") + "'") ++ like
+            fr"AND CAST(json_extract(event_json, ${"$." + filter.column}) AS TEXT)" ++ like
         }
       }
 
@@ -190,7 +190,7 @@ private[micro] class SqliteStorage(xa: Transactor[IO], maxEvents: Option[Int]) e
         case "event_id" | "app_id" | "event_name" =>
           Fragment.const(sorting.column)
         case _ =>
-          fr"event_json->>" ++ Fragment.const("'" + sorting.column.replace("'", "") + "'")
+          fr"json_extract(event_json, ${"$." + sorting.column})"
       }
       val direction = if (sorting.desc) "DESC" else "ASC"
       fr"ORDER BY" ++ columnExpr ++ Fragment.const(s" $direction")

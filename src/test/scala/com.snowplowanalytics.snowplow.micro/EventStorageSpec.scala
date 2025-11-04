@@ -308,7 +308,7 @@ trait EventStorageColumnStatsSpec {
         }.unsafeRunSync()
       }
 
-      "should ignore complex columns (containing dots)" >> {
+      "should ignore complex columns" >> {
         storageResource.use { storage =>
           for {
             _ <- storage.addToGood(List(GoodEvent1))
