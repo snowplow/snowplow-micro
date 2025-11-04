@@ -41,7 +41,7 @@ export function EventsChart({
       validEvents: point.validEvents,
       failedEvents: point.failedEvents,
       timestamp: point.timestamp,
-    }))
+    })).reverse()
   }, [timelineData])
 
   const handleChartClick = (event: any) => {
