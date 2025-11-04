@@ -90,7 +90,6 @@ export function DataTable({
     )
   }, [
     selectedColumns,
-    events,
     selectedCellId,
     onJsonCellToggle,
     onReorderColumns,
@@ -112,12 +111,11 @@ export function DataTable({
     manualSorting: true,
   })
 
-  const currentPageRows = events.length
   const pageSize = 50
-  const startRow = currentPageRows > 0 ? (currentPage - 1) * pageSize + 1 : 0
+  const startRow = events.length > 0 ? (currentPage - 1) * pageSize + 1 : 0
   const endRow =
-    currentPageRows > 0
-      ? Math.min((currentPage - 1) * pageSize + currentPageRows, totalItems)
+    events.length > 0
+      ? Math.min(startRow + events.length - 1, totalItems)
       : 0
 
   return (
@@ -127,7 +125,7 @@ export function DataTable({
           {/* Table container with scrolling */}
           <div className="flex-1 overflow-auto rounded-md border bg-background">
             <Table className="table-auto">
-              <TableHeader isLoading={isLoading}>
+              <TableHeader className={isLoading ? 'gradient-loading-border' : ''}>
                 {table.getHeaderGroups().map((headerGroup) => (
                   <React.Fragment key={headerGroup.id}>
                     <TableRow>
@@ -206,7 +204,7 @@ export function DataTable({
                 ))}
               </TableHeader>
               <TableBody>
-                {currentPageRows > 0 ? (
+                {events.length > 0 ? (
                   table.getRowModel().rows.map((row) => {
                     const rowId = row.original.event_id || row.id || row.index
                     const isRowSelected = selectedRowId === rowId

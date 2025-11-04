@@ -156,13 +156,10 @@ function App() {
     }
   }
 
-  const fetchEventsWithFilters = async (page?: number) => {
+  const fetchEventsWithFilters = async () => {
     setIsLoading(true)
     try {
-      const request = {
-        ...buildEventsRequest(false),
-        page: page ?? currentPage,
-      }
+      const request = buildEventsRequest(false)
       const fetchedEventData =
         await EventsApiService.fetchFilteredEvents(request)
       setEventData(fetchedEventData)
