@@ -72,10 +72,9 @@ function App() {
   }
 
   // Update column stats when columns change
-  const updateColumnStats = async () => {
-    const selectedColumnNames = selectedColumns.map((col) => col.name)
+  const updateColumnStats = async (columnNames: string[]) => {
     try {
-      const stats = await EventsApiService.fetchColumnStats(selectedColumnNames)
+      const stats = await EventsApiService.fetchColumnStats(columnNames)
       setColumnStats(stats)
     } catch (err) {
       console.warn('Failed to fetch column stats:', err)
@@ -91,9 +90,9 @@ function App() {
   } = useColumnManager({
     availableColumnNames,
     setColumnFilters,
-    onColumnAdded: () => {
+    onColumnAdded: (columnNames) => {
       scrollToLastColumn()
-      updateColumnStats()
+      updateColumnStats(columnNames)
     },
   })
 
@@ -125,6 +124,7 @@ function App() {
 
     let timeRange
     if (isRefresh) {
+      // only filter by selected minute, or not at all
       timeRange = selectedMinute
         ? {
             start: new Date(selectedMinute).getTime(),
@@ -132,6 +132,7 @@ function App() {
           }
         : undefined
     } else {
+      // add a (non-inclusive) upper bound to avoid getting newer events in the results
       const refreshTimeLimit = lastRefreshTime?.getTime()
       if (selectedMinute && refreshTimeLimit) {
         timeRange = {

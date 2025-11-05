@@ -44,7 +44,7 @@ function loadSelectedColumns(): string[] {
 type UseColumnManagerProps = {
   availableColumnNames: string[]
   setColumnFilters: OnChangeFn<ColumnFiltersState>
-  onColumnAdded?: () => void
+  onColumnAdded?: (columnNames: string[]) => void
 }
 
 type UseColumnManagerReturn = {
@@ -103,7 +103,7 @@ export function useColumnManager({
       const updated = [...selectedColumnNames, fieldName]
       setSelectedColumnNames(updated)
       // Notify that a column was added
-      onColumnAdded?.()
+      onColumnAdded?.(updated)
     }
   }
 
