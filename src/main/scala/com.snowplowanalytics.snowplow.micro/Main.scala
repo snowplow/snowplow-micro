@@ -19,7 +19,7 @@ object Main
     name = s"docker run ${BuildInfo.dockerAlias}",
     header =
       s"""Notes:
-         |    - With --storage and/or --max-events, /micro/all, /micro/good and /micro/bad endpoints are not supported.
+         |    - With --storage, /micro/all, /micro/good and /micro/bad endpoints are not supported.
          |    - With --max-events set to 0, all /micro/* API endpoints are disabled.""".stripMargin,
     version = BuildInfo.version
   ) {

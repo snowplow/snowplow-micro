@@ -230,11 +230,12 @@ private[micro] object SqliteStorage {
 
   /** Create SQLite storage with file-based database. */
   def file(dbPath: String, maxEvents: Option[Int]): Resource[IO, SqliteStorage] = {
-    val url = s"jdbc:sqlite:$dbPath"
+    val url = s"jdbc:sqlite:$dbPath?journal_mode=WAL"
     create(url, maxEvents)
   }
 
-  /** Create SQLite storage with in-memory database. */
+  /** Create SQLite storage with in-memory database.
+    * For tests only (does not support multiple connections). */
   def inMemory(maxEvents: Option[Int]): Resource[IO, SqliteStorage] = {
     val url = "jdbc:sqlite::memory:"
     create(url, maxEvents)

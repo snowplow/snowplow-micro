@@ -11,7 +11,7 @@
 package com.snowplowanalytics.snowplow.micro
 
 import cats.effect.{IO, Resource}
-import com.snowplowanalytics.snowplow.micro.Configuration.MicroConfig
+import com.snowplowanalytics.snowplow.micro.Configuration.StorageConfig
 import io.circe.Json
 
 import java.time.Instant
@@ -39,15 +39,13 @@ object NoStorage extends EventStorage {
 }
 
 object EventStorage {
-  def create(config: MicroConfig): Resource[IO, EventStorage] = {
-    (config.storage, config.maxEvents) match {
-      case (_, Some(0)) =>
+  def create(config: StorageConfig): Resource[IO, EventStorage] = {
+    config match {
+      case StorageConfig.None =>
         Resource.pure(NoStorage)
-      case (Some(storagePath), maxEvents) =>
-        SqliteStorage.file(storagePath.toString, maxEvents)
-      case (None, Some(maxEvents)) =>
-        SqliteStorage.inMemory(Some(maxEvents))
-      case (None, None) =>
+      case StorageConfig.Persistent(path, maxEvents) =>
+        SqliteStorage.file(path.toString, maxEvents)
+      case StorageConfig.InMemory =>
         Resource.pure(new InMemoryStorage())
     }
   }
