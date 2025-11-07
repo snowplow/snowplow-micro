@@ -43,7 +43,12 @@ lazy val dependencies = Seq(
     Dependencies.specs2,
     Dependencies.specs2CE,
     Dependencies.badRows,
-    Dependencies.slf4jSimple
+    Dependencies.slf4jSimple,
+    // fs2-blobstore modules for cloud storage blob URL support
+    Dependencies.fs2BlobS3,
+    Dependencies.fs2BlobGcs,
+    Dependencies.fs2BlobAzure,
+    Dependencies.azureIdentity
   )
 )
 
