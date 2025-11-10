@@ -113,25 +113,29 @@ export function generateColumns(
       header: ({ column }) => {
         return (
           <DraggableColumn index={index} onReorder={onReorderColumns}>
-            <Button
-              variant="ghost"
-              onClick={() =>
-                column.toggleSorting(column.getIsSorted() !== 'desc')
-              }
-              className="h-8 px-2 flex items-center group"
-              title="Sort column"
-            >
-              <TruncatedColumnName columnMetadata={columnMetadata} />
-              <div className="ml-2">
-                {column.getIsSorted() === 'asc' ? (
-                  <ArrowUp className="h-4 w-4" />
-                ) : column.getIsSorted() === 'desc' ? (
-                  <ArrowDown className="h-4 w-4" />
-                ) : (
-                  <ArrowDown className="h-4 w-4 opacity-0 group-hover:opacity-100 transition-opacity" />
-                )}
-              </div>
-            </Button>
+            {columnMetadata.isJSON ?
+              // Sorting currently not supported for complex columns
+              <TruncatedColumnName className="px-2" columnMetadata={columnMetadata} /> :
+              <Button
+                variant="ghost"
+                onClick={() =>
+                  column.toggleSorting(column.getIsSorted() !== 'desc')
+                }
+                className="h-8 px-2 flex items-center group"
+                title="Sort column"
+              >
+                <TruncatedColumnName columnMetadata={columnMetadata} />
+                <div className="ml-2">
+                  {column.getIsSorted() === 'asc' ? (
+                    <ArrowUp className="h-4 w-4" />
+                  ) : column.getIsSorted() === 'desc' ? (
+                    <ArrowDown className="h-4 w-4" />
+                  ) : (
+                    <ArrowDown className="h-4 w-4 opacity-0 group-hover:opacity-100 transition-opacity" />
+                  )}
+                </div>
+              </Button>
+            }
           </DraggableColumn>
         )
       },
