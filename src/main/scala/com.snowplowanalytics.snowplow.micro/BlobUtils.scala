@@ -13,11 +13,14 @@ package com.snowplowanalytics.snowplow.micro
 import blobstore.azure.AzureStore
 import blobstore.gcs.GcsStore
 import blobstore.s3.S3Store
-import blobstore.url.Url
+import blobstore.url.exception.MultipleUrlValidationException
+import blobstore.url.{Authority, Url, Path => BlobPath}
+import cats.data.Validated.{Invalid, Valid}
 import cats.effect.{IO, Resource, Sync}
 import cats.implicits._
+import com.azure.core.http.policy.{HttpLogDetailLevel, HttpLogOptions}
 import com.azure.identity.DefaultAzureCredentialBuilder
-import com.azure.storage.blob.{BlobServiceAsyncClient, BlobServiceClientBuilder}
+import com.azure.storage.blob.{BlobServiceAsyncClient, BlobServiceClientBuilder, BlobUrlParts}
 import com.google.cloud.storage.StorageOptions
 import com.snowplowanalytics.snowplow.micro.Configuration.EnvironmentVariables
 import fs2.Stream
@@ -104,8 +107,13 @@ case class AzureClient(account: String) extends BlobClient {
         s => Sync[IO].pure(s)
       ))
     } yield new BlobClientImpl(uri => {
-      Stream.eval(Url.parseF[IO](uri.toString)).flatMap { url =>
-        store.get(url, 16 * 1024)
+      val inputParts = BlobUrlParts.parse(uri.toString)
+      val reconstructedUrl = Authority
+        .parse(inputParts.getBlobContainerName)
+        .map(authority => Url(inputParts.getScheme, authority, BlobPath(inputParts.getBlobName)))
+      reconstructedUrl match {
+        case Valid(url) => store.get(url, 16 * 1024)
+        case Invalid(errors) => Stream.raiseError[IO](MultipleUrlValidationException(errors))
       }
     })
   }
