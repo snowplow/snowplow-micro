@@ -30,6 +30,8 @@ import org.http4s.dsl.Http4sDsl
 import org.http4s.{HttpRoutes, Response, StaticFile}
 import org.joda.time.DateTime
 
+import java.time.Instant
+
 sealed trait MicroRoutes[S <: EventStorage] extends Http4sDsl[IO] {
   protected def igluResolver: Resolver[IO]
   protected def storage: S
@@ -39,11 +41,33 @@ sealed trait MicroRoutes[S <: EventStorage] extends Http4sDsl[IO] {
   def commonRoutes: HttpRoutes[IO] = HttpRoutes.of[IO] {
     case (POST | GET) -> Root / "micro" / "reset" =>
       storage.reset().flatMap(_ => Ok("Reset completed"))
+    case request @ POST -> Root / "micro" / "events" =>
+      request.as[EventsRequest].flatMap { req =>
+        storage.getFilteredEvents(req).flatMap(response => Ok(response))
+      }
+    case GET -> Root / "micro" / "columns" =>
+      storage.getColumns.flatMap(columns => Ok(columns))
+    case request @ POST -> Root / "micro" / "columnStats" =>
+      request.as[ColumnStatsRequest].flatMap { req =>
+        storage.getColumnStats(req.columns).flatMap(stats => Ok(stats))
+      }
+    case GET -> Root / "micro" / "timeline" =>
+      storage.getTimeline.flatMap(timeline => Ok(timeline))
     case GET -> Root / "micro" / "iglu" / vendor / name / "jsonschema" / versionVar =>
       lookupSchema(vendor, name, versionVar)
     case GET -> "micro" /: path if path.startsWithString("ui") =>
       handleUIPath(path)
   }
+
+  protected def commonEndpoints = List(
+    "/micro/events",
+    "/micro/reset",
+    "/micro/columns",
+    "/micro/columnStats",
+    "/micro/timeline",
+    "/micro/iglu",
+    "/micro/ui"
+  )
 
   private def handleUIPath(path: Path): IO[Response[IO]] = {
     path match {
@@ -75,8 +99,6 @@ sealed trait MicroRoutes[S <: EventStorage] extends Http4sDsl[IO] {
 final class InMemoryRoutes(protected val igluResolver: Resolver[IO], protected val storage: InMemoryStorage)
                           (implicit protected val lookup: RegistryLookup[IO]) extends MicroRoutes[InMemoryStorage] {
   private val inMemoryRoutes: HttpRoutes[IO] = HttpRoutes.of[IO] {
-    case GET -> Root / "micro" / "events" =>
-      Ok(storage.getGoodAndIncomplete.map(_.event.toJson(lossy = true)))
     case (POST | GET) -> Root / "micro" / "all" =>
       Ok(storage.getSummary())
     case GET -> Root / "micro" / "good" =>
@@ -92,7 +114,7 @@ final class InMemoryRoutes(protected val igluResolver: Resolver[IO], protected v
         Ok(storage.filterBad(filters))
       }
     case _ -> "micro" /: _ =>
-      NotFound("Supported endpoints: /micro/events, /micro/all, /micro/good, /micro/bad, /micro/reset, /micro/iglu, /micro/ui")
+      NotFound(s"Supported endpoints: /micro/all, /micro/good, /micro/bad, ${commonEndpoints.mkString(", ")}")
   }
 
   val routes: HttpRoutes[IO] = commonRoutes <+> inMemoryRoutes
@@ -102,10 +124,8 @@ final class SqliteRoutes(protected val igluResolver: Resolver[IO],
                          protected val storage: SqliteStorage)
                         (implicit protected val lookup: RegistryLookup[IO]) extends MicroRoutes[SqliteStorage] {
   private val sqliteRoutes: HttpRoutes[IO] = HttpRoutes.of[IO] {
-    case GET -> Root / "micro" / "events" =>
-      storage.getEvents.flatMap(events => Ok(events))
     case _ -> "micro" /: _ =>
-      NotFound("Supported endpoints: /micro/events, /micro/reset, /micro/iglu, /micro/ui")
+      NotFound(s"Supported endpoints: ${commonEndpoints.mkString(", ")}")
   }
 
   val routes: HttpRoutes[IO] = commonRoutes <+> sqliteRoutes
@@ -131,6 +151,12 @@ object Routing {
   implicit val dateTimeEncoder: Encoder[DateTime] =
     Encoder[String].contramap(_.toString)
 
+  implicit val instantEncoder: Encoder[Instant] =
+    Encoder[Long].contramap(_.toEpochMilli)
+
+  implicit val instantDecoder: Decoder[Instant] =
+    Decoder[Long].map(Instant.ofEpochMilli)
+
   implicit val nameValuePairEncoder: Encoder[NameValuePair] =
     Encoder[String].contramap(kv => s"${kv.getName}=${kv.getValue}")
 
@@ -144,7 +170,19 @@ object Routing {
   implicit val e: Encoder[Event] = deriveEncoder
   implicit val be: Encoder[BadEvent] = deriveEncoder
   implicit val re: Encoder[ResolutionError] = deriveEncoder
+  implicit val tp: Encoder[TimelinePoint] = deriveEncoder
+  implicit val td: Encoder[TimelineData] = deriveEncoder
+  implicit val cs: Encoder[ColumnStats] = deriveEncoder
+  implicit val ef: Encoder[EventsFilter] = deriveEncoder
+  implicit val tr: Encoder[TimeRange] = deriveEncoder
+  implicit val es: Encoder[EventsSorting] = deriveEncoder
+  implicit val er: Encoder[EventsResponse] = deriveEncoder
 
   implicit val fg: Decoder[FiltersGood] = deriveDecoder
   implicit val fb: Decoder[FiltersBad] = deriveDecoder
+  implicit val csr: Decoder[ColumnStatsRequest] = deriveDecoder
+  implicit val efd: Decoder[EventsFilter] = deriveDecoder
+  implicit val trd: Decoder[TimeRange] = deriveDecoder
+  implicit val esd: Decoder[EventsSorting] = deriveDecoder
+  implicit val erd: Decoder[EventsRequest] = deriveDecoder
 }

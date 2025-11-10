@@ -10,6 +10,7 @@
 
 package com.snowplowanalytics.snowplow.micro
 
+import cats.effect.{IO, Resource}
 import cats.effect.unsafe.implicits.global
 import org.specs2.mutable.Specification
 import org.joda.time.DateTime
@@ -20,7 +21,7 @@ import com.snowplowanalytics.snowplow.analytics.scalasdk.Event
 import java.util.UUID
 import java.time.Instant
 
-class InMemoryStorageSpec extends Specification {
+class InMemoryStorageSpec extends Specification with EventStorageTimelineSpec with EventStorageColumnStatsSpec with EventStorageFilteredEventsSpec {
   import InMemoryStorageSpec._
 
   "getSummary" >> {
@@ -295,6 +296,10 @@ class InMemoryStorageSpec extends Specification {
       InMemoryStorage.keepBadEvent(BadEvent1, shouldNotKeep2) should beFalse
     }
   }
+
+  timelineTests(Resource.eval(IO(emptyCache())), "InMemoryStorage")
+  columnStatsTests(Resource.eval(IO(emptyCache())), "InMemoryStorage")
+  filteredEventsTests(Resource.eval(IO(emptyCache())), "InMemoryStorage")
 }
 
 object InMemoryStorageSpec {
@@ -320,7 +325,8 @@ object InMemoryStorageSpec {
       Some("type1"),
       Some("com.snowplowanalytics.example1"),
       List("com.snowplowanalytics.context1a", "com.snowplowanalytics.context1b"),
-      Event.minimal(UUID.randomUUID, Instant.ofEpochSecond(1761686664), "collector1", "etl1")
+      Event.minimal(UUID.randomUUID, Instant.ofEpochSecond(1761686400), "collector1", "etl1")
+        .copy(app_id = Some("test1")) // 00:00
     )
 
   val GoodEvent2: GoodEvent =
@@ -329,7 +335,8 @@ object InMemoryStorageSpec {
       Some("type2"),
       Some("com.snowplowanalytics.example2"),
       List("com.snowplowanalytics.context2a", "com.snowplowanalytics.context2b"),
-      Event.minimal(UUID.randomUUID, Instant.ofEpochSecond(1761686665), "collector1", "etl1")
+      Event.minimal(UUID.randomUUID, Instant.ofEpochSecond(1761686430), "collector1", "etl1")
+        .copy(app_id = Some("test2")) // 00:30 (same minute as Event1)
     )
 
   val GoodEvent3: GoodEvent =
@@ -338,7 +345,8 @@ object InMemoryStorageSpec {
       Some("type3"),
       Some("com.snowplowanalytics.example3"),
       List("com.snowplowanalytics.context3a"),
-      Event.minimal(UUID.randomUUID, Instant.ofEpochSecond(1761686666), "collector1", "etl1")
+      Event.minimal(UUID.randomUUID, Instant.ofEpochSecond(1761686520), "collector1", "etl1")
+        .copy(app_id = Some("test3")) // 02:00
     )
 
   val CollectorPayload1: CollectorPayload =

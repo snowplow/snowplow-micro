@@ -5,10 +5,7 @@ import type { Event } from '@/services/api'
 import { DraggableColumn } from '@/components/DraggableColumn'
 import { TruncatedCell } from '@/components/TruncatedCell'
 import { TruncatedColumnName } from '@/components/TruncatedColumnName'
-import {
-  truncateJsonForDisplay,
-  valueToSearchableString,
-} from './json-fields'
+import { truncateJsonForDisplay } from './json-fields'
 import { type ColumnMetadata } from './column-metadata'
 import { hasFailureData } from './event-utils'
 
@@ -22,47 +19,23 @@ export type EventColumnDef = ColumnDef<Event> & {
   meta?: EventColumnMeta
 }
 
-
-/**
- * Get distinct values for a column from the data
- */
-function getDistinctValues(events: Event[], columnMetadata: ColumnMetadata): string[] {
-  const values = new Set<string>()
-
-  events.forEach((event) => {
-    const value = columnMetadata.accessor(event)
-    if (value !== undefined && value !== null) {
-      if (columnMetadata.isJSON) {
-        // For JSON columns, use the searchable string representation
-        values.add(valueToSearchableString(value))
-      } else {
-        values.add(String(value))
-      }
-    }
-  })
-
-  return Array.from(values).sort()
-}
-
 /**
  * Generate columns from selected fields and available field info
  */
 export function generateColumns(
   selectedColumns: ColumnMetadata[],
-  events: Event[],
   selectedCellId: string | null,
   onJsonCellToggle: (cellId: string, value: any, title: string) => void,
-  onReorderColumns: (fromIndex: number, toIndex: number) => void
+  onReorderColumns: (fromIndex: number, toIndex: number) => void,
+  columnStats?: Record<string, { values: string[] }>
 ): EventColumnDef[] {
   const columns: EventColumnDef[] = []
 
   // Pinned status column
   columns.push({
     id: 'status',
-    accessorFn: (row) => hasFailureData(row) ? 'failed' : 'valid',
-    header: () => (
-      <div className="text-center">Status</div>
-    ),
+    accessorFn: (row) => (hasFailureData(row) ? 'failed' : 'valid'),
+    header: () => <div className="text-center">Status</div>,
     meta: {
       eventStatusFilter: true,
     },
@@ -82,7 +55,8 @@ export function generateColumns(
         )
       }
 
-      const failureData = row.original.contexts_com_snowplowanalytics_snowplow_failure_1
+      const failureData =
+        row.original.contexts_com_snowplowanalytics_snowplow_failure_1
       if (Array.isArray(failureData) && onJsonCellToggle) {
         const failureCount = failureData.length
         return (
@@ -119,24 +93,15 @@ export function generateColumns(
     },
     enableSorting: false,
     enableColumnFilter: true,
-    filterFn: (row, _columnId, filterValue) => {
-      if (filterValue === 'all' || !filterValue) return true
-      const hasFailures = hasFailureData(row.original)
-      if (filterValue === 'valid') return !hasFailures
-      if (filterValue === 'failed') return hasFailures
-      return true
-    },
   })
 
   // Add selected columns
   selectedColumns.forEach((columnMetadata, index) => {
     const { name: fieldName } = columnMetadata
 
-    // Get distinct values for filterable columns (exclude only timestamps)
-    const distinctValues = !columnMetadata.isTimestamp
-      ? getDistinctValues(events, columnMetadata)
-      : []
-    const useAutocomplete = distinctValues.length > 0 && distinctValues.length <= 20
+    // Use backend columnStats if available, otherwise no autocomplete
+    const distinctValues = columnStats?.[fieldName]?.values ?? []
+    const useAutocomplete = distinctValues.length > 0
 
     const columnDef: EventColumnDef = {
       id: fieldName,
@@ -148,25 +113,29 @@ export function generateColumns(
       header: ({ column }) => {
         return (
           <DraggableColumn index={index} onReorder={onReorderColumns}>
-            <Button
-              variant="ghost"
-              onClick={() =>
-                column.toggleSorting(column.getIsSorted() !== 'desc')
-              }
-              className="h-8 px-2 flex items-center group"
-              title="Sort column"
-            >
-              <TruncatedColumnName columnMetadata={columnMetadata} />
-              <div className="ml-2">
-                {column.getIsSorted() === 'asc' ? (
-                  <ArrowUp className="h-4 w-4" />
-                ) : column.getIsSorted() === 'desc' ? (
-                  <ArrowDown className="h-4 w-4" />
-                ) : (
-                  <ArrowDown className="h-4 w-4 opacity-0 group-hover:opacity-100 transition-opacity" />
-                )}
-              </div>
-            </Button>
+            {columnMetadata.isJSON ?
+              // Sorting currently not supported for complex columns
+              <TruncatedColumnName className="px-2" columnMetadata={columnMetadata} /> :
+              <Button
+                variant="ghost"
+                onClick={() =>
+                  column.toggleSorting(column.getIsSorted() !== 'desc')
+                }
+                className="h-8 px-2 flex items-center group"
+                title="Sort column"
+              >
+                <TruncatedColumnName columnMetadata={columnMetadata} />
+                <div className="ml-2">
+                  {column.getIsSorted() === 'asc' ? (
+                    <ArrowUp className="h-4 w-4" />
+                  ) : column.getIsSorted() === 'desc' ? (
+                    <ArrowDown className="h-4 w-4" />
+                  ) : (
+                    <ArrowDown className="h-4 w-4 opacity-0 group-hover:opacity-100 transition-opacity" />
+                  )}
+                </div>
+              </Button>
+            }
           </DraggableColumn>
         )
       },
@@ -222,26 +191,8 @@ export function generateColumns(
         // Regular formatting for primitive values - use TruncatedCell for strings
         return <TruncatedCell value={String(value)} />
       },
-      enableSorting: true,
-      enableColumnFilter: !columnMetadata.isTimestamp,
-      sortingFn: columnMetadata.isJSON
-        ? (rowA, rowB, columnId) => {
-            const aValue = rowA.getValue(columnId)
-            const bValue = rowB.getValue(columnId)
-            const aString = valueToSearchableString(aValue)
-            const bString = valueToSearchableString(bValue)
-            return aString.localeCompare(bString)
-          }
-        : 'auto',
-      filterFn: columnMetadata.isJSON
-        ? (row, columnId, filterValue) => {
-            const value = row.getValue(columnId)
-            const searchableString = valueToSearchableString(value)
-            return searchableString
-              .toLowerCase()
-              .includes(filterValue.toLowerCase())
-          }
-        : 'includesString',
+      enableSorting: !columnMetadata.isJSON,
+      enableColumnFilter: !columnMetadata.isTimestamp && !columnMetadata.isJSON,
     }
 
     columns.push(columnDef)

@@ -2,15 +2,15 @@ import { truncateMiddle } from './event-utils'
 import type { Event } from '@/services/api'
 
 export type ColumnMetadata = {
-  name: string                    // original name (e.g., "contexts_schema.field")
+  name: string // original name (e.g., "contexts_schema.field")
   isNested: boolean
   isJSON: boolean
   isTimestamp: boolean
   parentColumn?: string
   fieldName?: string
-  truncatedName?: string          // only present if truncated
+  truncatedName?: string // only present if truncated
   icon: 'entity' | 'event' | null
-  accessor: (event: Event) => any  // function to get the value from an event
+  accessor: (event: Event) => any // function to get the value from an event
 }
 
 /**
@@ -18,7 +18,9 @@ export type ColumnMetadata = {
  */
 export function createColumnMetadata(columnName: string): ColumnMetadata {
   const isNested = columnName.includes('.')
-  const isJSON = columnName.startsWith('unstruct_event_') || columnName.startsWith('contexts_')
+  const isJSON =
+    columnName.startsWith('unstruct_event_') ||
+    columnName.startsWith('contexts_')
   const isTimestamp = columnName.endsWith('_tstamp')
 
   // Compute display text and icon (same for both nested and non-nested)
@@ -28,14 +30,18 @@ export function createColumnMetadata(columnName: string): ColumnMetadata {
 
   // Check for contexts_ prefix (removing prefix counts as truncation)
   if (displayText.startsWith('contexts_')) {
-    displayText = displayText.replace('contexts_', '').replace('com_snowplowanalytics_snowplow_', '')
+    displayText = displayText
+      .replace('contexts_', '')
+      .replace('com_snowplowanalytics_snowplow_', '')
     icon = 'entity'
     wasTruncated = true
   }
 
   // Check for unstruct_event_ prefix (removing prefix counts as truncation)
   if (displayText.startsWith('unstruct_event_')) {
-    displayText = displayText.replace('unstruct_event_', '').replace('com_snowplowanalytics_snowplow_', '')
+    displayText = displayText
+      .replace('unstruct_event_', '')
+      .replace('com_snowplowanalytics_snowplow_', '')
     icon = 'event'
     wasTruncated = true
   }
@@ -59,7 +65,7 @@ export function createColumnMetadata(columnName: string): ColumnMetadata {
       fieldName: undefined,
       truncatedName: wasTruncated ? displayText : undefined,
       icon,
-      accessor
+      accessor,
     }
   } else {
     // Handle nested columns
@@ -103,7 +109,7 @@ export function createColumnMetadata(columnName: string): ColumnMetadata {
       fieldName,
       truncatedName: wasTruncated ? displayText : undefined,
       icon,
-      accessor
+      accessor,
     }
   }
 }

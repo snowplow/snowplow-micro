@@ -15,9 +15,10 @@ import cats.implicits._
 import doobie._
 import doobie.implicits._
 import doobie.hikari.HikariTransactor
-import io.circe.{Json, parser}
+import io.circe.parser
 
 import java.sql.Timestamp
+import java.time.Instant
 import java.util.concurrent.Executors
 import scala.concurrent.ExecutionContext
 import scala.util.Random
@@ -36,24 +37,38 @@ private[micro] class SqliteStorage(xa: Transactor[IO], maxEvents: Option[Int]) e
       val eventData = events.zip(eventJsons).map { case (goodEvent, eventJson) =>
         val appId = goodEvent.event.app_id
         val eventName = goodEvent.event.event_name
-        (goodEvent.event.event_id.toString, Timestamp.from(goodEvent.event.collector_tstamp), eventJson.noSpaces, goodEvent.incomplete, appId, eventName)
+        (goodEvent.event.event_id.toString, goodEvent.event.collector_tstamp, eventJson.noSpaces, goodEvent.incomplete, appId, eventName)
       }
+
+      val allColumns = eventJsons.map(EventStorage.extractColumnsFromEvent)
+        .reduce(_.union(_)).toList
 
       val insertEventsProgram = {
         val sql = "INSERT OR IGNORE INTO events (event_id, timestamp, event_json, failed, app_id, event_name) VALUES (?, ?, ?, ?, ?, ?)"
-        Update[(String, Timestamp, String, Boolean, Option[String], Option[String])](sql).updateMany(eventData)
+        Update[(String, Instant, String, Boolean, Option[String], Option[String])](sql).updateMany(eventData)
+      }
+
+      val insertColumnsProgram = if (allColumns.nonEmpty) {
+        val sql = "INSERT OR IGNORE INTO columns (name) VALUES (?)"
+        Update[String](sql).updateMany(allColumns)
+      } else {
+        ().pure[ConnectionIO]
       }
 
       val cleanupProgram = maxEvents.fold(().pure[ConnectionIO]) { limit =>
-        // Only run cleanup with 1% probability to avoid excessive overhead
-        if (Random.nextDouble() < 0.01) {
+        // Probabilistic cleanup to avoid excessive overhead
+        // We want to stay close to the limit, so:
+        //   * For a limit of 100 or less, run every batch
+        //   * For a limit of 10k, run every 100 batches (1%)
+        //   * For a limit of 100k, run every 1000 batches (1%)
+        if (Random.nextDouble() < (100 / limit)) {
           cleanupOldEvents(limit)
         } else {
           ().pure[ConnectionIO]
         }
       }
 
-      (insertEventsProgram *> cleanupProgram).transact(xa)
+      (insertEventsProgram *> insertColumnsProgram *> cleanupProgram).transact(xa).void
     } else {
       IO.unit
     }
@@ -64,28 +79,148 @@ private[micro] class SqliteStorage(xa: Transactor[IO], maxEvents: Option[Int]) e
 
   /** Reset storage by deleting all events. */
   override def reset(): IO[Unit] = {
-    sql"DELETE FROM events".update.run.transact(xa).void
+    (sql"DELETE FROM events".update.run *> sql"DELETE FROM columns".update.run).transact(xa).void
   }
 
-  /** Get all events as JSON for the /micro/events endpoint. */
-  def getEvents: IO[List[Json]] = {
-    val query = maxEvents match {
-      case Some(limit) => sql"SELECT event_json FROM events ORDER BY timestamp DESC LIMIT $limit"
-      case None => sql"SELECT event_json FROM events ORDER BY timestamp DESC"
-    }
-
-    query
+  override def getColumns: IO[List[String]] = {
+    sql"SELECT name FROM columns ORDER BY name"
       .query[String]
       .to[List]
       .transact(xa)
-      .flatMap { jsonStrings =>
-        jsonStrings.traverse { jsonStr =>
-          IO.fromEither(parser.parse(jsonStr))
-        }
+  }
+
+  override def getTimeline: IO[TimelineData] = {
+    val query = sql"""
+      WITH latest_event AS (
+        SELECT COALESCE(MAX(timestamp), ${System.currentTimeMillis()}) as max_timestamp FROM events
+      ),
+      time_range AS (
+        SELECT
+          (max_timestamp / 60000) * 60000 as latest_minute,
+          (max_timestamp / 60000) * 60000 - 30 * 60000 as start_minute
+        FROM latest_event
+      ),
+      sparse_data AS (
+        SELECT
+          (timestamp / 60000) * 60000 as minute,
+          COUNT(CASE WHEN NOT failed THEN 1 END) as valid_count,
+          COUNT(CASE WHEN failed THEN 1 END) as failed_count
+        FROM events, time_range
+        WHERE timestamp >= time_range.start_minute AND timestamp < (time_range.latest_minute + 60000)
+        GROUP BY minute
+      )
+      SELECT minute, valid_count, failed_count FROM sparse_data ORDER BY minute DESC
+    """
+
+    query
+      .query[TimelinePoint]
+      .to[List]
+      .transact(xa)
+      .map { sparsePoints =>
+        val filledPoints = EventStorage.fillMissingMinutes(sparsePoints)
+        TimelineData(filledPoints)
       }
   }
 
+  override def getColumnStats(columns: List[String]): IO[Map[String, ColumnStats]] = {
+    // TODO: support complex columns at some point
+    val simpleColumns = columns.filterNot(col =>
+      EventStorage.isComplexColumn(col) ||
+        EventStorage.isTimestampColumn(col)
+    )
 
+    simpleColumns.traverse { column =>
+      val query = column match {
+        case "event_id" | "app_id" | "event_name"  =>
+          fr"SELECT DISTINCT" ++ Fragment.const(column) ++ fr"as value FROM events" ++
+            fr"WHERE value IS NOT NULL LIMIT 20"
+        case _ =>
+          fr"SELECT DISTINCT CAST(json_extract(event_json, ${"$." + column}) AS TEXT) as value FROM events" ++
+            fr"WHERE value IS NOT NULL AND value != 'null' LIMIT 20"
+      }
+
+      query.query[String]
+        .to[List]
+        .transact(xa)
+        .map(values => column -> ColumnStats(values))
+    }.map(_.filter(_._2.values.nonEmpty).toMap)
+  }
+
+  override def getFilteredEvents(request: EventsRequest): IO[EventsResponse] = {
+    val baseConditions = fr"WHERE 1=1"
+
+    // Build WHERE conditions
+    val whereConditions = List(
+      // Valid events filter
+      request.validEvents.map { validOnly =>
+        if (validOnly) fr"AND NOT failed" else fr"AND failed"
+      },
+      // Time range filter
+      request.timeRange.flatMap(_.start).map { start =>
+        fr"AND timestamp >= $start"
+      },
+      request.timeRange.flatMap(_.end).map { end =>
+        fr"AND timestamp < $end"
+      }
+    ).flatten
+
+    // TODO: support complex columns at some point
+    val columnFilters = request.filters
+      .filterNot(f => EventStorage.isComplexColumn(f.column))
+      .map { filter =>
+        val like = fr"LIKE ${"%" + filter.value + "%"}"
+        filter.column match {
+          case "event_id" | "app_id" | "event_name" =>
+            fr"AND" ++ Fragment.const(filter.column) ++ like
+          case _ =>
+            fr"AND CAST(json_extract(event_json, ${"$." + filter.column}) AS TEXT)" ++ like
+        }
+      }
+
+    val allConditions = whereConditions ++ columnFilters
+    val whereClause = allConditions.foldLeft(baseConditions)(_ ++ _)
+
+    // TODO: support complex columns at some point
+    val orderByClause = request.sorting.filterNot(s =>
+      EventStorage.isComplexColumn(s.column)
+    ).fold(fr"ORDER BY timestamp DESC") { sorting =>
+      val columnExpr = sorting.column match {
+        case "collector_tstamp" =>
+          Fragment.const("timestamp")
+        case "event_id" | "app_id" | "event_name" =>
+          Fragment.const(sorting.column)
+        case _ =>
+          fr"json_extract(event_json, ${"$." + sorting.column})"
+      }
+      val direction = if (sorting.desc) "DESC" else "ASC"
+      fr"ORDER BY" ++ columnExpr ++ Fragment.const(s" $direction")
+    }
+
+    // prevent OOM when an unreasonably large page size is supplied
+    // the UI only uses 50 currently
+    val safePageSize = Math.max(Math.min(request.pageSize, 100), 1)
+
+    // Single query with window function to get both data and total count
+    val offset = (request.page - 1) * safePageSize
+    val query = fr"SELECT event_json, COUNT(*) OVER() as total_count FROM events" ++
+      whereClause ++ orderByClause ++
+      fr"LIMIT ${safePageSize} OFFSET ${offset}"
+
+    query.query[(String, Int)]
+      .to[List]
+      .transact(xa)
+      .flatMap { results =>
+        val totalItems = results.headOption.map(_._2).getOrElse(0)
+        val jsonStrings = results.map(_._1)
+
+        jsonStrings.traverse { jsonStr =>
+          IO.fromEither(parser.parse(jsonStr))
+        }.map { events =>
+          val totalPages = Math.max(1, (totalItems + safePageSize - 1) / safePageSize)
+          EventsResponse(events, totalPages, totalItems)
+        }
+      }
+  }
 }
 
 private[micro] object SqliteStorage {
@@ -95,11 +230,12 @@ private[micro] object SqliteStorage {
 
   /** Create SQLite storage with file-based database. */
   def file(dbPath: String, maxEvents: Option[Int]): Resource[IO, SqliteStorage] = {
-    val url = s"jdbc:sqlite:$dbPath"
+    val url = s"jdbc:sqlite:$dbPath?journal_mode=WAL"
     create(url, maxEvents)
   }
 
-  /** Create SQLite storage with in-memory database. */
+  /** Create SQLite storage with in-memory database.
+    * For tests only (does not support multiple connections). */
   def inMemory(maxEvents: Option[Int]): Resource[IO, SqliteStorage] = {
     val url = "jdbc:sqlite::memory:"
     create(url, maxEvents)
@@ -118,7 +254,8 @@ private[micro] object SqliteStorage {
     } yield new SqliteStorage(xa, maxEvents)
   }
 
-  private def initialize(xa: Transactor[IO]): IO[Unit] = createEventsTable.transact(xa)
+  private def initialize(xa: Transactor[IO]): IO[Unit] =
+    (createEventsTable *> createColumnsTable).transact(xa)
 
   private def createEventsTable: ConnectionIO[Unit] = {
     sql"""
@@ -137,6 +274,15 @@ private[micro] object SqliteStorage {
       sql"CREATE INDEX IF NOT EXISTS idx_events_failed ON events(failed)".update.run.void
   }
 
+  private def createColumnsTable: ConnectionIO[Unit] = {
+    sql"""
+      CREATE TABLE IF NOT EXISTS columns (
+        name TEXT PRIMARY KEY
+      )
+    """.update.run.void *>
+      sql"CREATE INDEX IF NOT EXISTS idx_columns_name ON columns(name)".update.run.void
+  }
+
   private def cleanupOldEvents(limit: Int): ConnectionIO[Unit] = {
     sql"""
         DELETE FROM events
@@ -144,8 +290,16 @@ private[micro] object SqliteStorage {
           SELECT timestamp
           FROM events
           ORDER BY timestamp DESC
-          LIMIT 1 OFFSET $limit
+          LIMIT 1 OFFSET ${limit-1}
         )
       """.update.run.void
   }
+
+  implicit val instantEpochMeta: Meta[Instant] =
+    Meta[Timestamp].timap(_.toInstant)(Timestamp.from)
+
+  implicit val timelinePointRead: Read[TimelinePoint] =
+    Read[(Instant, Int, Int)].map { case (timestamp, validEvents, failedEvents) =>
+      TimelinePoint(validEvents, failedEvents, timestamp)
+    }
 }

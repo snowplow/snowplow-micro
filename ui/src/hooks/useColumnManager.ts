@@ -1,8 +1,6 @@
 import { useState, useMemo, useEffect } from 'react'
 
-import { type Event } from '@/services/api'
 import type { ColumnFiltersState, OnChangeFn } from '@tanstack/react-table'
-import { discoverAllFields } from '@/utils/json-fields'
 import { type ColumnMetadata, createColumnMetadata } from '@/utils/column-metadata'
 
 const STORAGE_KEY = 'snowplow-micro-selected-columns'
@@ -44,9 +42,9 @@ function loadSelectedColumns(): string[] {
 }
 
 type UseColumnManagerProps = {
-  events: Event[]
+  availableColumnNames: string[]
   setColumnFilters: OnChangeFn<ColumnFiltersState>
-  onColumnAdded?: () => void
+  onColumnAdded?: (columnNames: string[]) => void
 }
 
 type UseColumnManagerReturn = {
@@ -58,7 +56,7 @@ type UseColumnManagerReturn = {
 }
 
 export function useColumnManager({
-  events,
+  availableColumnNames,
   setColumnFilters,
   onColumnAdded,
 }: UseColumnManagerProps): UseColumnManagerReturn {
@@ -82,7 +80,7 @@ export function useColumnManager({
     const set = new Set([
       ...selectedColumnNames,
       ...parentsOfSelected,
-      ...discoverAllFields(events),
+      ...availableColumnNames,
     ])
 
     // Remove failure entity, br_ fields, and all their nested fields
@@ -94,7 +92,7 @@ export function useColumnManager({
     )
 
     return filteredColumnNames.map(createColumnMetadata)
-  }, [events, selectedColumnNames])
+  }, [availableColumnNames, selectedColumnNames])
 
   const toggleColumn = (fieldName: string) => {
     if (selectedColumnNames.includes(fieldName)) {
@@ -105,7 +103,7 @@ export function useColumnManager({
       const updated = [...selectedColumnNames, fieldName]
       setSelectedColumnNames(updated)
       // Notify that a column was added
-      onColumnAdded?.()
+      onColumnAdded?.(updated)
     }
   }
 

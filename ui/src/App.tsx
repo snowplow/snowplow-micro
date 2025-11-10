@@ -3,7 +3,15 @@ import { DataTable } from '@/components/DataTable'
 import { ColumnSelector } from '@/components/ColumnSelector'
 import { JsonSidePanel } from '@/components/JsonSidePanel'
 import { EventsChart } from '@/components/EventsChart'
-import { type Event, EventsApiService } from '@/services/api'
+import {
+  type Event,
+  type TimelineData,
+  type ColumnStats,
+  type EventsRequest,
+  type EventsResponse,
+  type EventsFilter,
+  EventsApiService,
+} from '@/services/api'
 import { useColumnManager } from '@/hooks/useColumnManager'
 import { Button } from '@/components/ui/button'
 import {
@@ -12,13 +20,26 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
-import { RefreshCw, Trash2, Columns3Cog, FilterX, MoreVertical } from 'lucide-react'
-import { type ColumnFiltersState } from '@tanstack/react-table'
-import { roundToMinute } from '@/utils/event-utils'
+import {
+  RefreshCw,
+  Trash2,
+  Columns3Cog,
+  FilterX,
+  MoreVertical,
+} from 'lucide-react'
+import { type ColumnFiltersState, type SortingState } from '@tanstack/react-table'
 
 function App() {
-  const [events, setEvents] = useState<Event[]>([])
+  const [eventData, setEventData] = useState<EventsResponse>({
+    events: [],
+    totalPages: 0,
+    totalItems: 0,
+  })
+  const [currentPage, setCurrentPage] = useState(1)
+  const [timelineData, setTimelineData] = useState<TimelineData>({ points: [] })
+  const [availableColumnNames, setAvailableColumnNames] = useState<string[]>([])
   const [isLoading, setIsLoading] = useState(false)
+  const [isRefreshing, setIsRefreshing] = useState(false)
   const [showColumnSelector, setShowColumnSelector] = useState(false)
   const [selectedCellId, setSelectedCellId] = useState<string | null>(null)
   const [selectedRowId, setSelectedRowId] = useState<string | null>(null)
@@ -30,6 +51,10 @@ function App() {
   const [selectedMinute, setSelectedMinute] = useState<string | null>(null)
   const [lastRefreshTime, setLastRefreshTime] = useState<Date | null>(null)
   const [showActionsMenu, setShowActionsMenu] = useState(false)
+  const [columnStats, setColumnStats] = useState<Record<string, ColumnStats>>(
+    {}
+  )
+  const [sorting, setSorting] = useState<SortingState>([])
 
   // Handle scrolling to newly added columns
   const scrollToLastColumn = () => {
@@ -46,34 +71,142 @@ function App() {
     }, 100)
   }
 
-  const { availableColumns, selectedColumns, toggleColumn, reorderColumns, resetToDefaults } =
-    useColumnManager({ events, setColumnFilters, onColumnAdded: scrollToLastColumn })
-
-  // Filter events based on selected minute
-  const filteredEvents = events.filter((event) => {
-    // Filter by selected minute
-    if (selectedMinute && event.collector_tstamp) {
-      const eventTime = new Date(event.collector_tstamp).getTime()
-      const selectedTime = new Date(selectedMinute).getTime()
-      const minuteStart = roundToMinute(eventTime)
-
-      if (minuteStart !== selectedTime) return false
+  // Update column stats when columns change
+  const updateColumnStats = async (columnNames: string[]) => {
+    try {
+      const stats = await EventsApiService.fetchColumnStats(columnNames)
+      setColumnStats(stats)
+    } catch (err) {
+      console.warn('Failed to fetch column stats:', err)
     }
+  }
 
-    return true
+  const {
+    availableColumns,
+    selectedColumns,
+    toggleColumn,
+    reorderColumns,
+    resetToDefaults,
+  } = useColumnManager({
+    availableColumnNames,
+    setColumnFilters,
+    onColumnAdded: (columnNames) => {
+      scrollToLastColumn()
+      updateColumnStats(columnNames)
+    },
   })
 
-  const fetchEvents = async () => {
-    setIsLoading(true)
+  // Set initial sorting when collector_tstamp is available
+  useEffect(() => {
+    if (sorting.length === 0 && selectedColumns.some(col => col.name === 'collector_tstamp')) {
+      setSorting([{ id: 'collector_tstamp', desc: true }])
+    }
+  }, [selectedColumns, sorting])
 
+  const buildEventsRequest = (isRefresh = false): EventsRequest => {
+    // Separate status filter from column filters
+    const statusFilter = columnFilters.find(f => f.id === 'status')
+    const regularFilters = columnFilters.filter(f => f.id !== 'status')
+
+    const filters: EventsFilter[] = regularFilters.map((filter) => ({
+      column: filter.id,
+      value: String(filter.value),
+    }))
+
+    // Map status filter to validEvents field
+    const validEvents = statusFilter
+      ? statusFilter.value === 'valid'
+        ? true
+        : statusFilter.value === 'failed'
+        ? false
+        : undefined
+      : undefined
+
+    let timeRange
+    if (isRefresh) {
+      // only filter by selected minute, or not at all
+      timeRange = selectedMinute
+        ? {
+            start: new Date(selectedMinute).getTime(),
+            end: new Date(selectedMinute).getTime() + 60000,
+          }
+        : undefined
+    } else {
+      // add a (non-inclusive) upper bound to avoid getting newer events in the results
+      const refreshTimeLimit = lastRefreshTime?.getTime()
+      if (selectedMinute && refreshTimeLimit) {
+        timeRange = {
+          start: new Date(selectedMinute).getTime(),
+          end: Math.min(
+            new Date(selectedMinute).getTime() + 60000,
+            refreshTimeLimit
+          ),
+        }
+      } else if (refreshTimeLimit) {
+        timeRange = { end: refreshTimeLimit }
+      }
+    }
+
+    return {
+      filters,
+      validEvents,
+      timeRange,
+      sorting: sorting.length > 0 ? { column: sorting[0].id, desc: sorting[0].desc } : undefined,
+      page: currentPage,
+      pageSize: 50,
+    }
+  }
+
+  const fetchEventsWithFilters = async () => {
+    setIsLoading(true)
     try {
-      const fetchedEvents = await EventsApiService.fetchEvents()
-      setEvents(fetchedEvents)
-      setLastRefreshTime(new Date())
+      const request = buildEventsRequest(false)
+      const fetchedEventData =
+        await EventsApiService.fetchFilteredEvents(request)
+      setEventData(fetchedEventData)
+
+      // If current page is beyond available pages, go to last page
+      if (
+        fetchedEventData.totalPages > 0 &&
+        currentPage > fetchedEventData.totalPages
+      ) {
+        setCurrentPage(fetchedEventData.totalPages)
+      }
     } catch (err) {
-      console.error('Failed to fetch events:', err)
+      console.error('Failed to fetch filtered events:', err)
     } finally {
       setIsLoading(false)
+    }
+  }
+
+  const refreshAllData = async () => {
+    setIsRefreshing(true)
+    try {
+      setCurrentPage(1)
+      const selectedColumnNames = selectedColumns.map((col) => col.name)
+      const request = { ...buildEventsRequest(true), page: 1 }
+
+      const [
+        fetchedEventData,
+        fetchedTimeline,
+        fetchedColumns,
+        fetchedColumnStats,
+      ] = await Promise.all([
+        EventsApiService.fetchFilteredEvents(request),
+        EventsApiService.fetchTimeline(),
+        EventsApiService.fetchColumns(),
+        EventsApiService.fetchColumnStats(selectedColumnNames),
+      ])
+
+      setEventData(fetchedEventData)
+      setTimelineData(fetchedTimeline)
+      setAvailableColumnNames(fetchedColumns)
+      setColumnStats(fetchedColumnStats)
+      setLastRefreshTime(new Date())
+    } catch (err) {
+      console.error('Failed to refresh data:', err)
+    } finally {
+      setIsRefreshing(false)
     }
   }
 
@@ -83,15 +216,19 @@ function App() {
     )
     if (!confirmed) return
 
-    setIsLoading(true)
+    setIsRefreshing(true)
     try {
       await EventsApiService.resetEvents()
-      setEvents([])
+      setEventData({ events: [], totalPages: 0, totalItems: 0 })
+      setTimelineData({ points: [] })
+      setAvailableColumnNames([])
       setSelectedMinute(null)
+      setCurrentPage(1)
+      setLastRefreshTime(null)
     } catch (err) {
       console.error('Failed to reset events:', err)
     } finally {
-      setIsLoading(false)
+      setIsRefreshing(false)
     }
   }
 
@@ -138,10 +275,8 @@ function App() {
     }
   }
 
-
   // Check if any filters are active
-  const hasActiveFilters =
-    selectedMinute !== null || columnFilters.length > 0
+  const hasActiveFilters = selectedMinute !== null || columnFilters.length > 0
 
   // Reset all filters
   const resetAllFilters = () => {
@@ -167,9 +302,20 @@ function App() {
     return filters
   }
 
+  // Debounced filter/sort/page changes
+  useEffect(() => {
+    if (!lastRefreshTime) return
+
+    const timeoutId = setTimeout(() => {
+      fetchEventsWithFilters()
+    }, 100)
+
+    return () => clearTimeout(timeoutId)
+  }, [columnFilters, selectedMinute, currentPage, sorting])
+
   // Initial load
   useEffect(() => {
-    fetchEvents()
+    refreshAllData()
   }, [])
 
   return (
@@ -193,11 +339,11 @@ function App() {
             <Button
               variant="outline"
               size="sm"
-              onClick={() => fetchEvents()}
-              disabled={isLoading}
+              onClick={() => refreshAllData()}
+              disabled={isRefreshing}
             >
               <RefreshCw
-                className={`mr-2 h-4 w-4 ${isLoading ? 'animate-spin' : ''}`}
+                className={`mr-2 h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`}
               />
               Refresh
             </Button>
@@ -275,7 +421,7 @@ function App() {
         <div className="h-full p-4 min-w-0 flex flex-1 flex-col gap-4">
           {/* Events Chart */}
           <EventsChart
-            events={events}
+            timelineData={timelineData}
             selectedMinute={selectedMinute}
             onMinuteClick={setSelectedMinute}
           />
@@ -283,7 +429,7 @@ function App() {
           {/* Data Table */}
           <div className="flex-1 min-h-0">
             <DataTable
-              events={filteredEvents}
+              events={eventData.events}
               selectedColumns={selectedColumns}
               selectedCellId={selectedCellId}
               columnFilters={columnFilters}
@@ -293,6 +439,14 @@ function App() {
               onReorderColumns={reorderColumns}
               onRowClick={handleRowClick}
               selectedRowId={selectedRowId}
+              columnStats={columnStats}
+              currentPage={currentPage}
+              totalPages={eventData.totalPages}
+              totalItems={eventData.totalItems}
+              onPageChange={setCurrentPage}
+              sorting={sorting}
+              onSortingChange={setSorting}
+              isLoading={isLoading}
             />
           </div>
         </div>

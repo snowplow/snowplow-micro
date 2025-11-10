@@ -13,6 +13,9 @@ package com.snowplowanalytics.snowplow.micro
 import com.snowplowanalytics.snowplow.enrich.common.adapters.RawEvent
 import com.snowplowanalytics.snowplow.enrich.common.loaders.CollectorPayload
 import com.snowplowanalytics.snowplow.analytics.scalasdk.Event
+import io.circe.Json
+
+import java.time.Instant
 
 /** A list of this case class is returned when /micro/good is queried. */
 final case class GoodEvent(
@@ -48,3 +51,36 @@ private [micro] final case class FiltersBad(
 
 /** Retuned when /micro/all is queried, and also /micro/reset. */
 private [micro] final case class ValidationSummary(total: Int, good: Int, bad: Int)
+
+/** Timeline data structures for /micro/timeline endpoint. */
+final case class TimelinePoint(validEvents: Int, failedEvents: Int, timestamp: Instant)
+final case class TimelineData(points: List[TimelinePoint])
+
+/** Column statistics data structures for /micro/columnStats endpoint. */
+final case class ColumnStats(values: List[String])
+final case class ColumnStatsRequest(columns: List[String])
+
+/** Server-side filtering, sorting, and pagination for /micro/events endpoint. */
+final case class EventsFilter(
+  column: String,
+  value: String
+)
+
+final case class EventsRequest(
+  filters: List[EventsFilter],
+  validEvents: Option[Boolean], // Some(true) = valid only, Some(false) = failed only, None = all
+  timeRange: Option[TimeRange],
+  sorting: Option[EventsSorting],
+  page: Int,
+  pageSize: Int
+)
+
+final case class TimeRange(start: Option[Instant], end: Option[Instant])
+
+final case class EventsSorting(column: String, desc: Boolean)
+
+final case class EventsResponse(
+  events: List[Json],
+  totalPages: Int,
+  totalItems: Int
+)

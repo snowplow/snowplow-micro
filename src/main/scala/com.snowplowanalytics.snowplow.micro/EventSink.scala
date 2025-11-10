@@ -40,7 +40,7 @@ import java.time.Instant
  * to the collector endpoint.
  * The events are received as `CollectorPayload`s serialized with Thrift.
  * For each event it tries to validate it using Common Enrich,
- * and then stores the results in-memory in [[ValidationCache]].
+ * and then stores the results in an [[EventStorage]].
  */
 final class EventSink(igluClient: IgluCirceClient[IO],
                       registryLookup: RegistryLookup[IO],

@@ -46,20 +46,27 @@ object Configuration {
     case object Json extends OutputFormat
   }
 
+  sealed trait StorageConfig
+  object StorageConfig {
+    case object None extends StorageConfig
+    case object InMemory extends StorageConfig
+    case class Persistent(path: Path, maxEvents: Option[Int]) extends StorageConfig
+  }
+
   object Cli {
     implicit val uriArgument: Argument[Uri] = Argument.from("uri") { str =>
       Uri.fromString(str).leftMap(_ => s"Invalid URI: $str").toValidatedNel
     }
 
-    final case class Config(collector: Option[Path], iglu: Option[Path], outputFormat: OutputFormat, destination: Option[Uri], maxEvents: Option[Int], yauaa: Boolean, storage: Option[Path])
+    final case class Config(collector: Option[Path], iglu: Option[Path], outputFormat: OutputFormat, destination: Option[Uri], yauaa: Boolean, storage: StorageConfig)
 
     private val collector = Opts.option[Path]("collector-config", "Path to HOCON configuration", "c", "config.hocon").orNone
     private val iglu = Opts.option[Path]("iglu", "Configuration file for Iglu Client", "i", "iglu.json").orNone
     private val outputTsv = Opts.flag("output-tsv", "Output events in TSV format to standard output or HTTP destination", "t").orFalse
     private val outputJson = Opts.flag("output-json", "Output events in JSON format to standard output or HTTP destination (with a separate key for each schema)", "j").orFalse
     private val destination = Opts.option[Uri]("destination", "HTTP(s) URL to send output data to (requires --output-json or --output-tsv)", "d").orNone
-    private val storage = Opts.option[Path]("storage", "Path to an SQLite database file for persistent storage", "s").orNone
-    private val maxEvents = Opts.option[Int]("max-events", "Maximum number of events to store (enforced approximately)", "m").orNone
+    private val storagePath = Opts.option[Path]("storage", "Path to an SQLite database file for persistent storage", "s").orNone
+    private val maxEvents = Opts.option[Int]("max-events", "Maximum number of events to store (enforced approximately, non-zero values require --storage)", "m").orNone
     private val yauaa = Opts.flag("yauaa", "Enable YAUAA user agent enrichment").orFalse
 
     private val output = (outputTsv, outputJson, destination)
@@ -72,8 +79,18 @@ object Configuration {
         case (true, true, _) => "Cannot specify both --output-tsv and --output-json".invalidNel[(OutputFormat, Option[Uri])]
       }
 
-    val config: Opts[Config] = (collector, iglu, output, storage, maxEvents, yauaa).mapN {
-      case (c, i, (f, d), s, m, y) => Config(c, i, f, d, m, y, s)
+    private val storage = (maxEvents, storagePath)
+      .mapN { (_, _) }
+      .mapValidated {
+        case (Some(0), None) => StorageConfig.None.validNel[String]
+        case (Some(0), Some(_)) => "--storage cannot be used with --max-events 0".invalidNel[StorageConfig]
+        case (Some(_), None) => "--max-events > 0 requires --storage".invalidNel[StorageConfig]
+        case (limit, Some(path)) => StorageConfig.Persistent(path, limit).validNel[String]
+        case (None, None) => StorageConfig.InMemory.validNel[String]
+      }
+
+    val config: Opts[Config] = (collector, iglu, output, yauaa, storage).mapN {
+      case (c, i, (f, d), y, s) => Config(c, i, f, d, y, s)
     }
   }
 
@@ -95,8 +112,7 @@ object Configuration {
                                enrichConfig: EnrichConfig,
                                outputFormat: OutputFormat,
                                destination: Option[Uri],
-                               maxEvents: Option[Int],
-                               storage: Option[Path])
+                               storage: StorageConfig)
 
   final case class EnrichValidation(atomicFieldsLimits: AtomicFields)
   final case class EnrichConfig(
@@ -116,7 +132,7 @@ object Configuration {
         enrichConfig <- loadEnrichConfig()
         igluResources <- loadIgluResources(cliConfig.iglu, enrichConfig.maxJsonDepth)
         enrichmentsConfig <- loadEnrichmentConfig(igluResources.client, cliConfig.yauaa)
-      } yield MicroConfig(collectorConfig, igluResources, enrichmentsConfig, enrichConfig, cliConfig.outputFormat, cliConfig.destination, cliConfig.maxEvents, cliConfig.storage)
+      } yield MicroConfig(collectorConfig, igluResources, enrichmentsConfig, enrichConfig, cliConfig.outputFormat, cliConfig.destination, cliConfig.storage)
     }
   }
 
