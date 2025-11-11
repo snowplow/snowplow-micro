@@ -10,25 +10,22 @@
 
 package com.snowplowanalytics.snowplow.micro
 
-import blobstore.azure.AzureStore
-import blobstore.gcs.GcsStore
-import blobstore.s3.S3Store
-import blobstore.url.exception.MultipleUrlValidationException
-import blobstore.url.{Authority, Url, Path => BlobPath}
-import cats.data.Validated.{Invalid, Valid}
+import software.amazon.awssdk.services.s3.S3AsyncClient
+import software.amazon.awssdk.services.s3.model.{GetObjectRequest, GetObjectResponse}
+import software.amazon.awssdk.core.async.AsyncResponseTransformer
+import com.google.cloud.storage.{StorageOptions, BlobId}
+import com.azure.storage.blob.{BlobServiceAsyncClient, BlobServiceClientBuilder, BlobUrlParts}
+
+import java.nio.ByteBuffer
 import cats.effect.{IO, Resource, Sync}
 import cats.implicits._
-import com.azure.core.http.policy.{HttpLogDetailLevel, HttpLogOptions}
 import com.azure.identity.DefaultAzureCredentialBuilder
-import com.azure.storage.blob.{BlobServiceAsyncClient, BlobServiceClientBuilder, BlobUrlParts}
-import com.google.cloud.storage.StorageOptions
 import com.snowplowanalytics.snowplow.micro.Configuration.EnvironmentVariables
-import fs2.Stream
+import fs2.{Stream, Chunk}
 import fs2.io.file.{Files, Path}
 import org.http4s.ember.client.EmberClientBuilder
 import org.http4s.{Method, Request, Status, Uri}
 import software.amazon.awssdk.awscore.defaultsmode.DefaultsMode
-import software.amazon.awssdk.services.s3.S3AsyncClient
 
 import java.net.URI
 
@@ -56,13 +53,15 @@ sealed trait BlobClient {
   def mk: Resource[IO, BlobClientImpl]
 }
 
-class BlobClientImpl(download: URI => Stream[IO, Byte]) {
+class BlobClientImpl(download: URI => IO[ByteBuffer]) {
   def downloadToFiles(uriFilePairs: List[(URI, String)]): IO[Unit] = {
     uriFilePairs.traverse_ { case (uri, filePath) =>
-      download(uri)
-        .through(Files[IO].writeAll(Path(filePath)))
-        .compile
-        .drain
+      download(uri).flatMap { buffer =>
+        Stream.chunk(Chunk.byteBuffer(buffer))
+          .through(Files[IO].writeAll(Path(filePath)))
+          .compile
+          .drain
+      }
     }
   }
 }
@@ -71,11 +70,14 @@ case object S3Client extends BlobClient {
   override def mk: Resource[IO, BlobClientImpl] = {
     for {
       s3Client <- Resource.fromAutoCloseable(Sync[IO].delay(S3AsyncClient.builder().defaultsMode(DefaultsMode.AUTO).build()))
-      store <- Resource.eval(S3Store.builder[IO](s3Client).build.toEither.leftMap(_.head).pure[IO].rethrow)
     } yield new BlobClientImpl(uri => {
-      Stream.eval(Url.parseF[IO](uri.toString)).flatMap { url =>
-        store.get(url, 16 * 1024)
-      }
+      val bucket = uri.getHost
+      val key = uri.getPath.stripPrefix("/")
+      val request = GetObjectRequest.builder().bucket(bucket).key(key).build()
+
+      Sync[IO].fromCompletableFuture(
+        Sync[IO].delay(s3Client.getObject(request, AsyncResponseTransformer.toBytes[GetObjectResponse]()))
+      ).map(response => ByteBuffer.wrap(response.asByteArrayUnsafe()))
     })
   }
 }
@@ -83,12 +85,14 @@ case object S3Client extends BlobClient {
 case object GCSClient extends BlobClient {
   override def mk: Resource[IO, BlobClientImpl] = {
     for {
-      service <- Resource.eval(Sync[IO].delay(StorageOptions.getDefaultInstance.getService))
-      store <- Resource.eval(Sync[IO].delay(GcsStore.builder[IO](service).unsafe))
+      service <- Resource.fromAutoCloseable(Sync[IO].delay(StorageOptions.getDefaultInstance.getService))
     } yield new BlobClientImpl(uri => {
-      Stream.eval(Url.parseF[IO](uri.toString)).flatMap { url =>
-        store.get(url, 16 * 1024)
-      }
+      val bucket = uri.getHost
+      val blobName = uri.getPath.stripPrefix("/")
+      val blobId = BlobId.of(bucket, blobName)
+
+      Sync[IO].blocking(service.readAllBytes(blobId))
+        .map(ByteBuffer.wrap)
     })
   }
 }
@@ -97,19 +101,15 @@ case class AzureClient(account: String) extends BlobClient {
   override def mk: Resource[IO, BlobClientImpl] = {
     for {
       client <- Resource.eval(createAzureClient(account))
-      store <- Resource.eval(AzureStore.builder[IO](client).build.fold(
-        errors => Sync[IO].raiseError(new RuntimeException(s"Failed to create Azure store for $account: ${errors.toList.mkString(", ")}")),
-        s => Sync[IO].pure(s)
-      ))
     } yield new BlobClientImpl(uri => {
       val inputParts = BlobUrlParts.parse(uri.toString)
-      val reconstructedUrl = Authority
-        .parse(inputParts.getBlobContainerName)
-        .map(authority => Url(inputParts.getScheme, authority, BlobPath(inputParts.getBlobName)))
-      reconstructedUrl match {
-        case Valid(url) => store.get(url, 16 * 1024)
-        case Invalid(errors) => Stream.raiseError[IO](MultipleUrlValidationException(errors))
-      }
+      val blobClient = client
+        .getBlobContainerAsyncClient(inputParts.getBlobContainerName)
+        .getBlobAsyncClient(inputParts.getBlobName)
+
+      Sync[IO].fromCompletableFuture(
+        Sync[IO].delay(blobClient.downloadContent().toFuture)
+      ).map(binaryData => binaryData.toByteBuffer)
     })
   }
 
@@ -139,14 +139,14 @@ case object Http extends BlobClient {
       new BlobClientImpl(uri => {
         val request = Request[IO](Method.GET, Uri.unsafeFromString(uri.toString))
 
-        Stream.eval(httpClient.run(request).use { response =>
+        httpClient.run(request).use { response =>
           response.status match {
             case Status.Ok =>
-              IO.pure(response.body)
+              response.body.compile.to(Array).map(ByteBuffer.wrap)
             case status =>
               IO.raiseError(new RuntimeException(s"Failed to download $uri: ${status.code} ${status.reason}"))
           }
-        }).flatten
+        }
       })
     }
   }

@@ -37,8 +37,9 @@ object Dependencies {
     val specs2        = "4.12.2"
     val specs2CE      = "1.5.0"
 
-    // fs2-blobstore for blob storage abstraction (includes cloud SDKs transitively)
-    val fs2BlobStorage = "0.9.15"
+    val awsSdk = "2.33.1"
+    val gcpSdk = "2.45.0"
+    val azureStorageBlob = "12.25.1"
 
     // Azure Identity for DefaultAzureCredentialBuilder
     val azureIdentity = "1.13.3"
@@ -70,10 +71,9 @@ object Dependencies {
   val specs2       = "org.specs2"     %% "specs2-core"                % V.specs2    % Test
   val specs2CE     = "org.typelevel"  %% "cats-effect-testing-specs2" % V.specs2CE  % Test
 
-  // fs2-blobstore modules for cloud storage blob URL support
-  val fs2BlobS3        = "com.github.fs2-blobstore"   %% "s3"                   % V.fs2BlobStorage
-  val fs2BlobGcs       = "com.github.fs2-blobstore"   %% "gcs"                  % V.fs2BlobStorage
-  val fs2BlobAzure     = "com.github.fs2-blobstore"   %% "azure"                % V.fs2BlobStorage
+  val awsS3            = "software.amazon.awssdk"       %  "s3"                   % V.awsSdk
+  val googleCloudStorage = "com.google.cloud"           %  "google-cloud-storage" % V.gcpSdk
+  val azureStorageBlob = "com.azure"                    %  "azure-storage-blob"   % V.azureStorageBlob
 
   // Azure Identity for DefaultAzureCredentialBuilder
   val azureIdentity    = "com.azure"                  %  "azure-identity"       % V.azureIdentity
