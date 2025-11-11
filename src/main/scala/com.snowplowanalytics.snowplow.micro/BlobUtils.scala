@@ -40,7 +40,7 @@ object BlobUtils {
           AzureClient(uri.getHost.split("\\.").head)
         } else Http
       case "s3" => S3Client
-      case "gs" | "gcp" => GCSClient
+      case "gs" => GCSClient
       case "abfss" =>
         // Extract account from abfss://container@account.dfs.core.windows.net/path
         val account = uri.getHost.split("@").last.split("\\.").head
@@ -86,12 +86,7 @@ case object GCSClient extends BlobClient {
       service <- Resource.eval(Sync[IO].delay(StorageOptions.getDefaultInstance.getService))
       store <- Resource.eval(Sync[IO].delay(GcsStore.builder[IO](service).unsafe))
     } yield new BlobClientImpl(uri => {
-      // Convert gcp:// to gs:// if needed
-      val normalizedUri = if (uri.getScheme == "gcp") {
-        new URI("gs", uri.getHost, uri.getPath, uri.getFragment)
-      } else uri
-
-      Stream.eval(Url.parseF[IO](normalizedUri.toString)).flatMap { url =>
+      Stream.eval(Url.parseF[IO](uri.toString)).flatMap { url =>
         store.get(url, 16 * 1024)
       }
     })
