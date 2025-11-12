@@ -99,6 +99,8 @@ object Configuration {
     val igluRegistryUrl = "MICRO_IGLU_REGISTRY_URL"
     val igluApiKey = "MICRO_IGLU_API_KEY"
     val sslCertificatePassword = "MICRO_SSL_CERT_PASSWORD"
+    val azureBlobAccount = "MICRO_AZURE_BLOB_ACCOUNT"
+    val azureBlobSasToken = "MICRO_AZURE_BLOB_SAS_TOKEN"
   }
 
   final case class DummySinkConfig()

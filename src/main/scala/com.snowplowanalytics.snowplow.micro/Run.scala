@@ -30,10 +30,8 @@ import org.http4s.client.Client
 import org.typelevel.log4cats.Logger
 import org.typelevel.log4cats.slf4j.Slf4jLogger
 
-import java.io.File
 import java.security.{KeyStore, SecureRandom}
 import javax.net.ssl.{KeyManagerFactory, SSLContext, TrustManagerFactory}
-import scala.sys.process._
 
 object Run {
 
@@ -133,8 +131,12 @@ object Run {
   private def downloadAssets(configs: List[EnrichmentConf]): IO[Unit] = {
     configs
       .flatMap(_.filesToCache)
-      .traverse_ { case (uri, location) =>
-        logger.info(s"Downloading $uri...") *> IO(uri.toURL #> new File(location) !!)
+      .groupBy {
+        case (uri, _) => BlobUtils.blobClientFor(uri)
+      }
+      .toList
+      .traverse_ {
+        case (client, assets) => client.mk.use(_.downloadToFiles(assets))
       }
   }
 
