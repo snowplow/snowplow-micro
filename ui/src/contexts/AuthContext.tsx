@@ -13,7 +13,6 @@ type AuthContextType = {
   isLoading: boolean
   authEnabled: boolean
   getAccessToken: () => Promise<string | null>
-  login: () => Promise<void>
   error: string | null
 }
 
@@ -129,21 +128,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  // Login function
-  const login = async (): Promise<void> => {
-    if (!auth0Client) {
-      return
-    }
-
-    await auth0Client.loginWithRedirect()
-  }
-
   const value: AuthContextType = {
     isAuthenticated,
     isLoading,
     authEnabled: authConfig?.enabled || false,
     getAccessToken,
-    login,
     error,
   }
 
