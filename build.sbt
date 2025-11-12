@@ -45,6 +45,7 @@ lazy val dependencies = Seq(
     Dependencies.badRows,
     Dependencies.slf4jSimple,
     Dependencies.awsS3,
+    Dependencies.awsSts,
     Dependencies.googleCloudStorage,
     Dependencies.azureStorageBlob,
     Dependencies.azureIdentity
