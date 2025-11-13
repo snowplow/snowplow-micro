@@ -10,6 +10,7 @@
 
 package com.snowplowanalytics.snowplow.micro
 
+import cats.data.OptionT
 import cats.effect.IO
 import cats.implicits.toSemigroupKOps
 import com.snowplowanalytics.iglu.client.ClientError.ResolutionError
@@ -19,6 +20,7 @@ import com.snowplowanalytics.iglu.core.{SchemaKey, SchemaVer}
 import com.snowplowanalytics.snowplow.analytics.scalasdk.Event
 import com.snowplowanalytics.snowplow.enrich.common.adapters.RawEvent
 import com.snowplowanalytics.snowplow.enrich.common.loaders.CollectorPayload
+import com.snowplowanalytics.snowplow.micro.Configuration.AuthConfig
 import com.snowplowanalytics.snowplow.micro.Routing._
 import io.circe.generic.semiauto.{deriveDecoder, deriveEncoder}
 import io.circe.syntax.EncoderOps
@@ -27,7 +29,7 @@ import org.apache.http.NameValuePair
 import org.http4s.circe.CirceEntityDecoder._
 import org.http4s.circe.CirceEntityEncoder._
 import org.http4s.dsl.Http4sDsl
-import org.http4s.{HttpRoutes, Response, StaticFile}
+import org.http4s.{AuthedRoutes, HttpRoutes, Response, StaticFile}
 import org.joda.time.DateTime
 
 import java.time.Instant
@@ -35,10 +37,11 @@ import java.time.Instant
 sealed trait MicroRoutes[S <: EventStorage] extends Http4sDsl[IO] {
   protected def igluResolver: Resolver[IO]
   protected def storage: S
+  protected def authConfig: Option[AuthConfig]
   protected implicit def lookup: RegistryLookup[IO]
 
   /** Common routes for iglu, ui, and reset endpoints */
-  def commonRoutes: HttpRoutes[IO] = HttpRoutes.of[IO] {
+  val commonRoutes: HttpRoutes[IO] = HttpRoutes.of[IO] {
     case (POST | GET) -> Root / "micro" / "reset" =>
       storage.reset().flatMap(_ => Ok("Reset completed"))
     case request @ POST -> Root / "micro" / "events" =>
@@ -55,8 +58,18 @@ sealed trait MicroRoutes[S <: EventStorage] extends Http4sDsl[IO] {
       storage.getTimeline.flatMap(timeline => Ok(timeline))
     case GET -> Root / "micro" / "iglu" / vendor / name / "jsonschema" / versionVar =>
       lookupSchema(vendor, name, versionVar)
+  }
+
+  private val commonPublicRoutes = HttpRoutes.of[IO] {
     case GET -> "micro" /: path if path.startsWithString("ui") =>
       handleUIPath(path)
+    case GET -> Root / "micro" / "auth-config" =>
+      authConfig match {
+        case Some(config) =>
+          Ok(AuthConfigResponse(config.domain, config.audience, config.clientId).asJson)
+        case None =>
+          Ok(AuthConfigResponse("", "", "", enabled = false).asJson)
+      }
   }
 
   protected def commonEndpoints = List(
@@ -68,6 +81,22 @@ sealed trait MicroRoutes[S <: EventStorage] extends Http4sDsl[IO] {
     "/micro/iglu",
     "/micro/ui"
   )
+
+  protected def addAuthMiddleware(routes: HttpRoutes[IO]): HttpRoutes[IO] = {
+    val wrapped = authConfig match {
+      case Some(auth) =>
+        val authedRoutes = AuthedRoutes[Unit, IO](req => routes(req.req))
+        val middleware = Auth.authMiddleware(auth)(authedRoutes)
+        HttpRoutes[IO] { req =>
+          // prevent eagerly requiring auth for everything
+          // we need to bypass auth and fall through into collector routes that will come later
+          if (req.pathInfo.startsWith(Root / "micro")) middleware(req) else OptionT.none
+        }
+      case None => routes
+    }
+    // public routes must be accessible from the frontend without auth
+    commonPublicRoutes <+> wrapped
+  }
 
   private def handleUIPath(path: Path): IO[Response[IO]] = {
     path match {
@@ -96,7 +125,9 @@ sealed trait MicroRoutes[S <: EventStorage] extends Http4sDsl[IO] {
   }
 }
 
-final class InMemoryRoutes(protected val igluResolver: Resolver[IO], protected val storage: InMemoryStorage)
+final class InMemoryRoutes(protected val igluResolver: Resolver[IO],
+                           protected val storage: InMemoryStorage,
+                           protected val authConfig: Option[AuthConfig])
                           (implicit protected val lookup: RegistryLookup[IO]) extends MicroRoutes[InMemoryStorage] {
   private val inMemoryRoutes: HttpRoutes[IO] = HttpRoutes.of[IO] {
     case (POST | GET) -> Root / "micro" / "all" =>
@@ -117,18 +148,19 @@ final class InMemoryRoutes(protected val igluResolver: Resolver[IO], protected v
       NotFound(s"Supported endpoints: /micro/all, /micro/good, /micro/bad, ${commonEndpoints.mkString(", ")}")
   }
 
-  val routes: HttpRoutes[IO] = commonRoutes <+> inMemoryRoutes
+  val routes: HttpRoutes[IO] = addAuthMiddleware(commonRoutes <+> inMemoryRoutes)
 }
 
 final class SqliteRoutes(protected val igluResolver: Resolver[IO],
-                         protected val storage: SqliteStorage)
+                         protected val storage: SqliteStorage,
+                         protected val authConfig: Option[AuthConfig])
                         (implicit protected val lookup: RegistryLookup[IO]) extends MicroRoutes[SqliteStorage] {
   private val sqliteRoutes: HttpRoutes[IO] = HttpRoutes.of[IO] {
     case _ -> "micro" /: _ =>
       NotFound(s"Supported endpoints: ${commonEndpoints.mkString(", ")}")
   }
 
-  val routes: HttpRoutes[IO] = commonRoutes <+> sqliteRoutes
+  val routes: HttpRoutes[IO] = addAuthMiddleware(commonRoutes <+> sqliteRoutes)
 }
 
 object NoRoutes extends Http4sDsl[IO] {
@@ -138,15 +170,17 @@ object NoRoutes extends Http4sDsl[IO] {
 }
 
 object Routing {
-  def create(config: Configuration.MicroConfig, storage: EventStorage, lookup: RegistryLookup[IO]): HttpRoutes[IO] = {
+  def create(config: Configuration.MicroConfig, storage: EventStorage, auth: Option[AuthConfig], lookup: RegistryLookup[IO]): HttpRoutes[IO] = {
     storage match {
       case NoStorage => NoRoutes.routes
       case sqliteStorage: SqliteStorage =>
-        new SqliteRoutes(config.iglu.resolver, sqliteStorage)(lookup).routes
+        new SqliteRoutes(config.iglu.resolver, sqliteStorage, auth)(lookup).routes
       case inMemoryStorage: InMemoryStorage =>
-        new InMemoryRoutes(config.iglu.resolver, inMemoryStorage)(lookup).routes
+        new InMemoryRoutes(config.iglu.resolver, inMemoryStorage, auth)(lookup).routes
     }
   }
+
+  case class AuthConfigResponse(domain: String, audience: String, clientId: String, enabled: Boolean = true)
 
   implicit val dateTimeEncoder: Encoder[DateTime] =
     Encoder[String].contramap(_.toString)
@@ -177,6 +211,7 @@ object Routing {
   implicit val tr: Encoder[TimeRange] = deriveEncoder
   implicit val es: Encoder[EventsSorting] = deriveEncoder
   implicit val er: Encoder[EventsResponse] = deriveEncoder
+  implicit val acr: Encoder[AuthConfigResponse] = deriveEncoder
 
   implicit val fg: Decoder[FiltersGood] = deriveDecoder
   implicit val fb: Decoder[FiltersBad] = deriveDecoder

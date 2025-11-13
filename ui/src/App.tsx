@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useAuth } from '@/contexts/AuthContext'
 import { DataTable } from '@/components/DataTable'
 import { ColumnSelector } from '@/components/ColumnSelector'
 import { JsonSidePanel } from '@/components/JsonSidePanel'
@@ -30,6 +31,7 @@ import {
 import { type ColumnFiltersState, type SortingState } from '@tanstack/react-table'
 
 function App() {
+  const { isAuthenticated, isLoading: authIsLoading, error, getAccessToken } = useAuth()
   const [eventData, setEventData] = useState<EventsResponse>({
     events: [],
     totalPages: 0,
@@ -74,7 +76,8 @@ function App() {
   // Update column stats when columns change
   const updateColumnStats = async (columnNames: string[]) => {
     try {
-      const stats = await EventsApiService.fetchColumnStats(columnNames)
+      const token = await getAccessToken()
+      const stats = await EventsApiService.fetchColumnStats(columnNames, token)
       setColumnStats(stats)
     } catch (err) {
       console.warn('Failed to fetch column stats:', err)
@@ -160,9 +163,10 @@ function App() {
   const fetchEventsWithFilters = async () => {
     setIsLoading(true)
     try {
+      const token = await getAccessToken()
       const request = buildEventsRequest(false)
       const fetchedEventData =
-        await EventsApiService.fetchFilteredEvents(request)
+        await EventsApiService.fetchFilteredEvents(request, token)
       setEventData(fetchedEventData)
 
       // If current page is beyond available pages, go to last page
@@ -183,6 +187,7 @@ function App() {
     setIsRefreshing(true)
     try {
       setCurrentPage(1)
+      const token = await getAccessToken()
       const selectedColumnNames = selectedColumns.map((col) => col.name)
       const request = { ...buildEventsRequest(true), page: 1 }
 
@@ -192,10 +197,10 @@ function App() {
         fetchedColumns,
         fetchedColumnStats,
       ] = await Promise.all([
-        EventsApiService.fetchFilteredEvents(request),
-        EventsApiService.fetchTimeline(),
-        EventsApiService.fetchColumns(),
-        EventsApiService.fetchColumnStats(selectedColumnNames),
+        EventsApiService.fetchFilteredEvents(request, token),
+        EventsApiService.fetchTimeline(token),
+        EventsApiService.fetchColumns(token),
+        EventsApiService.fetchColumnStats(selectedColumnNames, token),
       ])
 
       setEventData(fetchedEventData)
@@ -218,7 +223,8 @@ function App() {
 
     setIsRefreshing(true)
     try {
-      await EventsApiService.resetEvents()
+      const token = await getAccessToken()
+      await EventsApiService.resetEvents(token)
       setEventData({ events: [], totalPages: 0, totalItems: 0 })
       setTimelineData({ points: [] })
       setAvailableColumnNames([])
@@ -304,19 +310,56 @@ function App() {
 
   // Debounced filter/sort/page changes
   useEffect(() => {
-    if (!lastRefreshTime) return
+    if (!lastRefreshTime || !isAuthenticated) return
 
     const timeoutId = setTimeout(() => {
       fetchEventsWithFilters()
     }, 100)
 
     return () => clearTimeout(timeoutId)
-  }, [columnFilters, selectedMinute, currentPage, sorting])
+  }, [columnFilters, selectedMinute, currentPage, sorting, isAuthenticated])
 
-  // Initial load
+  // Initial load - only when authentication is ready
   useEffect(() => {
-    refreshAllData()
-  }, [])
+    if (isAuthenticated && !authIsLoading) {
+      refreshAllData()
+    }
+  }, [isAuthenticated, authIsLoading])
+
+  // Show loading screen while auth is initializing
+  if (authIsLoading) {
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <div className="text-center">
+          <RefreshCw className="h-8 w-8 animate-spin mx-auto mb-4" />
+          <p>Loading...</p>
+        </div>
+      </div>
+    )
+  }
+
+  // Show error screen if auth failed
+  if (error) {
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <div className="text-center">
+          <p className="text-red-600 mb-4">Authentication Error: {error}</p>
+          <Button onClick={() => window.location.reload()}>Retry</Button>
+        </div>
+      </div>
+    )
+  }
+
+  // Only render the app when authenticated
+  if (!isAuthenticated) {
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <div className="text-center">
+          <p>Redirecting to login...</p>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="flex flex-col h-screen min-w-0 bg-page-background">
