@@ -224,13 +224,13 @@ private[micro] class SqliteStorage(xa: Transactor[IO], maxEvents: Option[Int]) e
 }
 
 private[micro] object SqliteStorage {
-  // few threads since SQLite does not support multiple concurrent writes anyway
+  // single thread to avoid database locking
   private val databaseExecutionContext = ExecutionContext
-    .fromExecutor(Executors.newFixedThreadPool(2))
+    .fromExecutor(Executors.newSingleThreadExecutor())
 
   /** Create SQLite storage with file-based database. */
   def file(dbPath: String, maxEvents: Option[Int]): Resource[IO, SqliteStorage] = {
-    val url = s"jdbc:sqlite:$dbPath?journal_mode=WAL"
+    val url = s"jdbc:sqlite:$dbPath?journal_mode=WAL&mmap_size=0"
     create(url, maxEvents)
   }
 
