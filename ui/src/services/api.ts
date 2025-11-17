@@ -74,7 +74,7 @@ export class EventsApiService {
     request: EventsRequest,
     token?: string | null
   ): Promise<EventsResponse> {
-    const url = new URL('/micro/events', window.location.origin)
+    const url = new URL('/micro/events?compress=true', window.location.origin)
 
     const response = await this.makeRequest(url.toString(), {
       method: 'POST',
@@ -97,7 +97,7 @@ export class EventsApiService {
    * Reset all events by calling the /micro/reset endpoint
    */
   static async resetEvents(token?: string | null): Promise<void> {
-    const url = new URL('/micro/reset', window.location.origin)
+    const url = new URL('/micro/reset?compress=true', window.location.origin)
 
     await this.makeRequest(url.toString(), {
       method: 'POST',
@@ -111,7 +111,7 @@ export class EventsApiService {
    * Fetch available column names from the backend
    */
   static async fetchColumns(token?: string | null): Promise<string[]> {
-    const url = new URL('/micro/columns', window.location.origin)
+    const url = new URL('/micro/columns?compress=true', window.location.origin)
 
     const response = await this.makeRequest(url.toString(), {
       method: 'GET',
@@ -132,7 +132,7 @@ export class EventsApiService {
    * Fetch timeline data from the backend
    */
   static async fetchTimeline(token?: string | null): Promise<TimelineData> {
-    const url = new URL('/micro/timeline', window.location.origin)
+    const url = new URL('/micro/timeline?compress=true', window.location.origin)
 
     const response = await this.makeRequest(url.toString(), {
       method: 'GET',
@@ -156,7 +156,7 @@ export class EventsApiService {
     columns: string[],
     token?: string | null
   ): Promise<Record<string, ColumnStats>> {
-    const url = new URL('/micro/columnStats', window.location.origin)
+    const url = new URL('/micro/columnStats?compress=true', window.location.origin)
 
     const response = await this.makeRequest(url.toString(), {
       method: 'POST',
