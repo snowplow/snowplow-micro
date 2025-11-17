@@ -11,7 +11,7 @@
 package com.snowplowanalytics.snowplow.micro
 
 import cats.effect.unsafe.implicits.global
-import cats.effect.IO
+import cats.effect.{IO, Resource}
 import org.specs2.mutable.Specification
 import io.circe.Json
 
@@ -117,16 +117,30 @@ class SqliteStorageSpec extends Specification with EventStorageTimelineSpec with
     }
   }
 
-  timelineTests(SqliteStorage.inMemory(None), "SqliteStorage")
-  columnStatsTests(SqliteStorage.inMemory(None), "SqliteStorage")
-  filteredEventsTests(SqliteStorage.inMemory(None), "SqliteStorage")
+  timelineTests(SqliteStorageSpec.createTempDbResource(None), "SqliteStorage")
+  columnStatsTests(SqliteStorageSpec.createTempDbResource(None), "SqliteStorage")
+  filteredEventsTests(SqliteStorageSpec.createTempDbResource(None), "SqliteStorage")
 }
 
 object SqliteStorageSpec {
   val allEventsRequest = EventsRequest(List.empty, None, None, None, 1, 100)
 
+  private def createTempDbPath(): String = {
+    val tmpDir = System.getProperty("java.io.tmpdir")
+    s"$tmpDir/snowplow-micro-test-${System.nanoTime()}.db"
+  }
+
+  private def createTempDbResource(maxEvents: Option[Int]): Resource[IO, SqliteStorage] = {
+    Resource.make(IO(createTempDbPath()))(path => IO {
+      // Clean up database file and WAL files after test
+      new java.io.File(path).delete()
+      new java.io.File(s"$path-shm").delete()
+      new java.io.File(s"$path-wal").delete()
+    }).flatMap(SqliteStorage.file(_, maxEvents))
+  }
+
   def withSqliteStorage[A](maxEvents: Option[Int] = None)(test: SqliteStorage => IO[A]): A = {
-    SqliteStorage.inMemory(maxEvents)
+    createTempDbResource(maxEvents)
       .use(test)
       .unsafeRunSync()
   }

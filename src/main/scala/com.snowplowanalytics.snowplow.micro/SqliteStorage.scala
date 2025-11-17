@@ -131,7 +131,7 @@ private[micro] class SqliteStorage(xa: Transactor[IO], maxEvents: Option[Int]) e
         EventStorage.isTimestampColumn(col)
     )
 
-    simpleColumns.traverse { column =>
+    simpleColumns.parTraverse { column =>
       val query = column match {
         case "event_id" | "app_id" | "event_name"  =>
           fr"SELECT DISTINCT value FROM (" ++
@@ -287,13 +287,6 @@ private[micro] object SqliteStorage {
       "temp_store=MEMORY"   // Use memory for temporary tables
     )
     val url = s"jdbc:sqlite:$dbPath?${params.mkString("&")}"
-    create(url, maxEvents)
-  }
-
-  /** Create SQLite storage with in-memory database.
-    * For tests only (does not support multiple connections). */
-  def inMemory(maxEvents: Option[Int]): Resource[IO, SqliteStorage] = {
-    val url = "jdbc:sqlite::memory:"
     create(url, maxEvents)
   }
 
