@@ -35,7 +35,7 @@ object NoStorage extends EventStorage {
   def getColumns: IO[List[String]] = IO.pure(List.empty)
   def getTimeline: IO[TimelineData] = IO.pure(TimelineData(List.empty))
   def getColumnStats(columns: List[String]): IO[Map[String, ColumnStats]] = IO.pure(Map.empty)
-  def getFilteredEvents(request: EventsRequest): IO[EventsResponse] = IO.pure(EventsResponse(List.empty, 0, 0))
+  def getFilteredEvents(request: EventsRequest): IO[EventsResponse] = IO.pure(EventsResponse(List.empty, 0, 0, isApproximate = false))
 }
 
 object EventStorage {

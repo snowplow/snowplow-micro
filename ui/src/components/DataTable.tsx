@@ -50,6 +50,7 @@ type DataTableProps = {
   currentPage: number
   totalPages: number
   totalItems: number
+  isApproximate: boolean
   onPageChange: (page: number) => void
   sorting: SortingState
   onSortingChange: OnChangeFn<SortingState>
@@ -71,12 +72,12 @@ export function DataTable({
   currentPage,
   totalPages,
   totalItems,
+  isApproximate,
   onPageChange,
   sorting,
   onSortingChange,
   isLoading,
 }: DataTableProps) {
-
   // Events are already in the correct format for react-table
 
   // Generate columns dynamically
@@ -114,9 +115,7 @@ export function DataTable({
   const pageSize = 50
   const startRow = events.length > 0 ? (currentPage - 1) * pageSize + 1 : 0
   const endRow =
-    events.length > 0
-      ? Math.min(startRow + events.length - 1, totalItems)
-      : 0
+    events.length > 0 ? Math.min(startRow + events.length - 1, totalItems) : 0
 
   return (
     <TooltipProvider delayDuration={300}>
@@ -125,7 +124,9 @@ export function DataTable({
           {/* Table container with scrolling */}
           <div className="flex-1 overflow-auto rounded-md border bg-background">
             <Table className="table-auto">
-              <TableHeader className={isLoading ? 'gradient-loading-border' : ''}>
+              <TableHeader
+                className={isLoading ? 'gradient-loading-border' : ''}
+              >
                 {table.getHeaderGroups().map((headerGroup) => (
                   <React.Fragment key={headerGroup.id}>
                     <TableRow>
@@ -264,14 +265,16 @@ export function DataTable({
             <div className="mt-4 flex items-center justify-between flex-shrink-0">
               {/* Row count on the left */}
               <div className="text-xs text-pagination font-light">
-                Showing {startRow}-{endRow} of {totalItems} events
+                Showing {startRow}-{endRow} of {isApproximate ? '~ ' : ''}
+                {totalItems} events
               </div>
 
               {/* Pagination on the right */}
               {totalPages > 1 && (
                 <div className="flex items-center space-x-4">
                   <div className="text-xs text-pagination font-light">
-                    Page {currentPage} of {totalPages}
+                    Page {currentPage} of {isApproximate ? '~ ' : ''}
+                    {totalPages}
                   </div>
                   <div className="flex items-center space-x-2">
                     <Button

@@ -123,6 +123,8 @@ private[micro] class SqliteStorage(xa: Transactor[IO], maxEvents: Option[Int]) e
   }
 
   override def getColumnStats(columns: List[String]): IO[Map[String, ColumnStats]] = {
+    import SqliteStorage.COLUMN_STATS_SCAN_LIMIT
+
     // TODO: support complex columns at some point
     val simpleColumns = columns.filterNot(col =>
       EventStorage.isComplexColumn(col) ||
@@ -132,11 +134,14 @@ private[micro] class SqliteStorage(xa: Transactor[IO], maxEvents: Option[Int]) e
     simpleColumns.traverse { column =>
       val query = column match {
         case "event_id" | "app_id" | "event_name"  =>
-          fr"SELECT DISTINCT" ++ Fragment.const(column) ++ fr"as value FROM events" ++
-            fr"WHERE value IS NOT NULL LIMIT 20"
+          fr"SELECT DISTINCT value FROM (" ++
+            fr"SELECT" ++ Fragment.const(column) ++ fr"as value FROM events" ++
+            fr"ORDER BY timestamp DESC LIMIT ${COLUMN_STATS_SCAN_LIMIT}" ++
+          fr") WHERE value IS NOT NULL LIMIT 20"
         case _ =>
-          fr"SELECT DISTINCT CAST(json_extract(event_json, ${"$." + column}) AS TEXT) as value FROM events" ++
-            fr"WHERE value IS NOT NULL AND value != 'null' LIMIT 20"
+          fr"SELECT DISTINCT CAST(json_extract(event_json, ${"$." + column}) AS TEXT) as value FROM (" ++
+            fr"SELECT event_json FROM events ORDER BY timestamp DESC LIMIT ${COLUMN_STATS_SCAN_LIMIT}" ++
+          fr") WHERE value IS NOT NULL AND value != 'null' LIMIT 20"
       }
 
       query.query[String]
@@ -153,7 +158,7 @@ private[micro] class SqliteStorage(xa: Transactor[IO], maxEvents: Option[Int]) e
     val whereConditions = List(
       // Valid events filter
       request.validEvents.map { validOnly =>
-        if (validOnly) fr"AND NOT failed" else fr"AND failed"
+        if (validOnly) fr"AND failed = ${false}" else fr"AND failed = ${true}"
       },
       // Time range filter
       request.timeRange.flatMap(_.start).map { start =>
@@ -167,13 +172,14 @@ private[micro] class SqliteStorage(xa: Transactor[IO], maxEvents: Option[Int]) e
     // TODO: support complex columns at some point
     val columnFilters = request.filters
       .filterNot(f => EventStorage.isComplexColumn(f.column))
+      .filter(_.value.nonEmpty) // Skip empty filter values
       .map { filter =>
-        val like = fr"LIKE ${"%" + filter.value + "%"}"
+        val equals = fr"=" ++ fr"${filter.value}" ++ Fragment.const(" COLLATE NOCASE")
         filter.column match {
           case "event_id" | "app_id" | "event_name" =>
-            fr"AND" ++ Fragment.const(filter.column) ++ like
+            fr"AND" ++ Fragment.const(filter.column) ++ equals
           case _ =>
-            fr"AND CAST(json_extract(event_json, ${"$." + filter.column}) AS TEXT)" ++ like
+            fr"AND CAST(json_extract(event_json, ${"$." + filter.column}) AS TEXT)" ++ equals
         }
       }
 
@@ -200,37 +206,87 @@ private[micro] class SqliteStorage(xa: Transactor[IO], maxEvents: Option[Int]) e
     // the UI only uses 50 currently
     val safePageSize = Math.max(Math.min(request.pageSize, 100), 1)
 
-    // Single query with window function to get both data and total count
+    // Split into two queries for better performance:
+    // 1. Count query: Fast for indexed columns, approximate for JSON columns
+    // 2. Data query: Processes only the requested page (e.g., 50 rows) instead of all rows
     val offset = (request.page - 1) * safePageSize
-    val query = fr"SELECT event_json, COUNT(*) OVER() as total_count FROM events" ++
+
+    val hasJsonFilter = request.filters.exists { filter =>
+      filter.column match {
+        case "event_id" | "app_id" | "event_name" => false
+        case _ => true
+      }
+    }
+
+    val countQuery = fr"SELECT COUNT(*) FROM events" ++ whereClause
+    val dataQuery = fr"SELECT event_json FROM events" ++
       whereClause ++ orderByClause ++
       fr"LIMIT ${safePageSize} OFFSET ${offset}"
 
-    query.query[(String, Int)]
-      .to[List]
-      .transact(xa)
-      .flatMap { results =>
-        val totalItems = results.headOption.map(_._2).getOrElse(0)
-        val jsonStrings = results.map(_._1)
+    val totalItemsIO: IO[(Int, Boolean)] = if (hasJsonFilter) {
+      val minCountNeeded = offset + safePageSize
+      val sampleLimit = minCountNeeded + 1
+      val sampleQuery = fr"SELECT COUNT(*) FROM (" ++
+        fr"SELECT 1 FROM events" ++ whereClause ++ fr"LIMIT ${sampleLimit}" ++
+      fr")"
 
-        jsonStrings.traverse { jsonStr =>
-          IO.fromEither(parser.parse(jsonStr))
-        }.map { events =>
-          val totalPages = Math.max(1, (totalItems + safePageSize - 1) / safePageSize)
-          EventsResponse(events, totalPages, totalItems)
+      sampleQuery.query[Int].unique.transact(xa).map { sampleCount =>
+        if (sampleCount > minCountNeeded) {
+          (sampleCount, true)
+        } else {
+          (sampleCount, false)
         }
       }
+    } else {
+      countQuery.query[Int].unique.transact(xa).map(count => (count, false))
+    }
+
+    for {
+      countResult <- totalItemsIO
+      jsonStrings <- dataQuery.query[String].to[List].transact(xa)
+      events <- jsonStrings.traverse { jsonStr =>
+        IO.fromEither(parser.parse(jsonStr))
+      }
+    } yield {
+      val (totalItems, isApproximate) = countResult
+      val totalPages = Math.max(1, (totalItems + safePageSize - 1) / safePageSize)
+      EventsResponse(events, totalPages, totalItems, isApproximate)
+    }
   }
 }
 
 private[micro] object SqliteStorage {
-  // few threads since SQLite does not support multiple concurrent writes anyway
-  private val databaseExecutionContext = ExecutionContext
-    .fromExecutor(Executors.newFixedThreadPool(2))
+  // Limit scan depth for columnStats queries to improve performance
+  // Only scan most recent N events instead of entire table
+  // Tunable: increase for more coverage, decrease for better performance
+  private val COLUMN_STATS_SCAN_LIMIT = 1000
+
+  private def databaseExecutionContext: Resource[IO, ExecutionContext] = {
+    Resource.make(
+      IO {
+        val executor = Executors.newFixedThreadPool(10)
+        (ExecutionContext.fromExecutor(executor), executor)
+      }
+    ) { case (_, executor) =>
+      IO {
+        executor.shutdown()
+        // Wait for existing tasks to complete (max 10 seconds)
+        // This prevents race conditions during test cleanup
+        val _ = executor.awaitTermination(10, java.util.concurrent.TimeUnit.SECONDS)
+      }
+    }.map(_._1)
+  }
 
   /** Create SQLite storage with file-based database. */
   def file(dbPath: String, maxEvents: Option[Int]): Resource[IO, SqliteStorage] = {
-    val url = s"jdbc:sqlite:$dbPath?journal_mode=WAL"
+    val params = List(
+      "journal_mode=WAL",   // Write-Ahead Logging for better concurrency
+      "busy_timeout=30000", // Wait up to 30 seconds instead of immediate BUSY error
+      "synchronous=NORMAL", // Balance between safety and performance
+      "cache_size=-20000",  // 20MB cache (negative = KB)
+      "temp_store=MEMORY"   // Use memory for temporary tables
+    )
+    val url = s"jdbc:sqlite:$dbPath?${params.mkString("&")}"
     create(url, maxEvents)
   }
 
@@ -243,19 +299,37 @@ private[micro] object SqliteStorage {
 
   private def create(url: String, maxEvents: Option[Int]): Resource[IO, SqliteStorage] = {
     for {
+      ec <- databaseExecutionContext
       xa <- HikariTransactor.newHikariTransactor[IO](
         driverClassName = "org.sqlite.JDBC",
         url = url,
         user = "", // SQLite doesn't use user/password
         pass = "",
-        connectEC = databaseExecutionContext
+        connectEC = ec
       )
+      _ <- Resource.eval(IO {
+        xa.kernel match {
+          case ds: com.zaxxer.hikari.HikariDataSource =>
+            val config = ds.getHikariConfigMXBean
+            config.setMaximumPoolSize(5)       // Allow multiple concurrent readers (WAL mode supports this)
+            config.setMinimumIdle(1)           // Keep one connection alive
+            config.setConnectionTimeout(30000) // 30 second connection timeout
+            config.setIdleTimeout(600000)      // 10 minute idle timeout
+          case _ =>
+            ()
+        }
+      }.handleErrorWith { err =>
+        IO(System.err.println(s"Warning: Failed to configure HikariCP pool: ${err.getMessage}"))
+      })
       _ <- Resource.eval(initialize(xa))
     } yield new SqliteStorage(xa, maxEvents)
   }
 
   private def initialize(xa: Transactor[IO]): IO[Unit] =
-    (createEventsTable *> createColumnsTable).transact(xa)
+    (createEventsTable *> createColumnsTable *> analyzeDatabase).transact(xa)
+
+  private def analyzeDatabase: ConnectionIO[Unit] =
+    sql"ANALYZE".update.run.void
 
   private def createEventsTable: ConnectionIO[Unit] = {
     sql"""
@@ -268,10 +342,15 @@ private[micro] object SqliteStorage {
         event_name TEXT
       )
     """.update.run.void *>
+      // Single-column indexes
       sql"CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp)".update.run.void *>
       sql"CREATE INDEX IF NOT EXISTS idx_events_app_id ON events(app_id)".update.run.void *>
       sql"CREATE INDEX IF NOT EXISTS idx_events_event_name ON events(event_name)".update.run.void *>
-      sql"CREATE INDEX IF NOT EXISTS idx_events_failed ON events(failed)".update.run.void
+      sql"CREATE INDEX IF NOT EXISTS idx_events_failed ON events(failed)".update.run.void *>
+      // Composite indexes for common filtered queries (dramatically improves performance with 10k+ rows)
+      sql"CREATE INDEX IF NOT EXISTS idx_events_failed_timestamp ON events(failed, timestamp)".update.run.void *>
+      sql"CREATE INDEX IF NOT EXISTS idx_events_app_id_timestamp ON events(app_id, timestamp)".update.run.void *>
+      sql"CREATE INDEX IF NOT EXISTS idx_events_event_name_timestamp ON events(event_name, timestamp)".update.run.void
   }
 
   private def createColumnsTable: ConnectionIO[Unit] = {

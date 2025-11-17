@@ -49,6 +49,7 @@ export type EventsResponse = {
   events: Event[]
   totalPages: number
   totalItems: number
+  isApproximate: boolean
 }
 
 export class EventsApiService {
