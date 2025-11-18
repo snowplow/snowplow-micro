@@ -273,7 +273,7 @@ export function DataTable({
               {totalPages > 1 && (
                 <div className="flex items-center space-x-4">
                   <div className="text-xs text-pagination font-light">
-                    Page {currentPage} of {isApproximate ? '~ ' : ''}
+                    Page {currentPage} of {isApproximate ? '≈ ' : ''}
                     {totalPages}
                   </div>
                   <div className="flex items-center space-x-2">
