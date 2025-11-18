@@ -265,7 +265,7 @@ export function DataTable({
             <div className="mt-4 flex items-center justify-between flex-shrink-0">
               {/* Row count on the left */}
               <div className="text-xs text-pagination font-light">
-                Showing {startRow}-{endRow} of {isApproximate ? '~ ' : ''}
+                Showing {startRow}-{endRow} of {isApproximate ? '≈ ' : ''}
                 {totalItems} events
               </div>
 
