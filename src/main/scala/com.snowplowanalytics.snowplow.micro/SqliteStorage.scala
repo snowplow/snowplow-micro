@@ -158,7 +158,7 @@ private[micro] class SqliteStorage(xa: Transactor[IO], maxEvents: Option[Int]) e
     val whereConditions = List(
       // Valid events filter
       request.validEvents.map { validOnly =>
-        if (validOnly) fr"AND failed = ${false}" else fr"AND failed = ${true}"
+        fr"AND failed = ${!validOnly}"
       },
       // Time range filter
       request.timeRange.flatMap(_.start).map { start =>
@@ -174,7 +174,7 @@ private[micro] class SqliteStorage(xa: Transactor[IO], maxEvents: Option[Int]) e
       .filterNot(f => EventStorage.isComplexColumn(f.column))
       .filter(_.value.nonEmpty) // Skip empty filter values
       .map { filter =>
-        val equals = fr"=" ++ fr"${filter.value}" ++ Fragment.const(" COLLATE NOCASE")
+        val equals = fr"=" ++ fr"${filter.value}" ++ fr"COLLATE NOCASE"
         filter.column match {
           case "event_id" | "app_id" | "event_name" =>
             fr"AND" ++ Fragment.const(filter.column) ++ equals
