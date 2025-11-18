@@ -31,7 +31,6 @@ import org.http4s.circe.CirceEntityEncoder._
 import org.http4s.dsl.Http4sDsl
 import org.http4s.server.middleware.GZip
 import org.http4s.{AuthedRoutes, HttpRoutes, Response, StaticFile}
-import fs2.compression.Compression
 import org.joda.time.DateTime
 
 import java.time.Instant
