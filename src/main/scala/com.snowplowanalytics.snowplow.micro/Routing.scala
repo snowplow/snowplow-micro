@@ -150,7 +150,7 @@ final class InMemoryRoutes(protected val igluResolver: Resolver[IO],
       NotFound(s"Supported endpoints: /micro/all, /micro/good, /micro/bad, ${commonEndpoints.mkString(", ")}")
   }
 
-  val routes: HttpRoutes[IO] = Routing.conditionalCompression(addAuthMiddleware(commonRoutes <+> inMemoryRoutes))
+  val routes: HttpRoutes[IO] = GZip(addAuthMiddleware(commonRoutes <+> inMemoryRoutes))
 }
 
 final class SqliteRoutes(protected val igluResolver: Resolver[IO],
@@ -162,7 +162,7 @@ final class SqliteRoutes(protected val igluResolver: Resolver[IO],
       NotFound(s"Supported endpoints: ${commonEndpoints.mkString(", ")}")
   }
 
-  val routes: HttpRoutes[IO] = Routing.conditionalCompression(addAuthMiddleware(commonRoutes <+> sqliteRoutes))
+  val routes: HttpRoutes[IO] = GZip(addAuthMiddleware(commonRoutes <+> sqliteRoutes))
 }
 
 object NoRoutes extends Http4sDsl[IO] {
@@ -179,19 +179,6 @@ object Routing {
         new SqliteRoutes(config.iglu.resolver, sqliteStorage, auth)(lookup).routes
       case inMemoryStorage: InMemoryStorage =>
         new InMemoryRoutes(config.iglu.resolver, inMemoryStorage, auth)(lookup).routes
-    }
-  }
-
-  /** Apply GZip compression conditionally based on ?compress=true query parameter */
-  def conditionalCompression(routes: HttpRoutes[IO])(implicit C: Compression[IO]): HttpRoutes[IO] = {
-    val gzippedRoutes = GZip(routes)
-    HttpRoutes[IO] { req =>
-      val shouldCompress = req.uri.query.params.get("compress").contains("true")
-      if (shouldCompress) {
-        gzippedRoutes(req)
-      } else {
-        routes(req)
-      }
     }
   }
 
