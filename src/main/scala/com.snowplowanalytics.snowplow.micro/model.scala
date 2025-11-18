@@ -83,5 +83,5 @@ final case class EventsResponse(
   events: List[Json],
   totalPages: Int,
   totalItems: Int,
-  isApproximate: Boolean
+  approximateCount: Boolean
 )

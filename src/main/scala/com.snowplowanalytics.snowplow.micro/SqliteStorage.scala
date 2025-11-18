@@ -248,9 +248,9 @@ private[micro] class SqliteStorage(xa: Transactor[IO], maxEvents: Option[Int]) e
         IO.fromEither(parser.parse(jsonStr))
       }
     } yield {
-      val (totalItems, isApproximate) = countResult
+      val (totalItems, approximateCount) = countResult
       val totalPages = Math.max(1, (totalItems + safePageSize - 1) / safePageSize)
-      EventsResponse(events, totalPages, totalItems, isApproximate)
+      EventsResponse(events, totalPages, totalItems, approximateCount)
     }
   }
 }

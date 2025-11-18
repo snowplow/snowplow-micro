@@ -174,7 +174,7 @@ private[micro] class InMemoryStorage extends EventStorage {
         List.empty
       }
 
-      EventsResponse(pageEvents, totalPages, totalItems, isApproximate = false)
+      EventsResponse(pageEvents, totalPages, totalItems, approximateCount = false)
     }
   }
 }
