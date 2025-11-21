@@ -265,7 +265,7 @@ private[micro] object SqliteStorage {
   private def databaseExecutionContext: Resource[IO, ExecutionContext] = {
     Resource.make(
       IO {
-        val executor = Executors.newFixedThreadPool(10)
+        val executor = Executors.newFixedThreadPool(5)
         (ExecutionContext.fromExecutor(executor), executor)
       }
     ) { case (_, executor) =>
