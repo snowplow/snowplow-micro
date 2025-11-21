@@ -310,7 +310,7 @@ object InMemoryStorageSpec {
   val testTimestamp = DateTime.parse("2014-01-16T00:49:58.278+00:00")
 
   def cacheOf(goodInit: List[GoodEvent], badInit: List[BadEvent]): InMemoryStorage = {
-    val storage = new InMemoryStorage()
+    val storage = new InMemoryStorage(None)
     storage.addToGood(goodInit).unsafeRunSync()
     storage.addToBad(badInit).unsafeRunSync()
     storage

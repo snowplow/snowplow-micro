@@ -43,10 +43,10 @@ object EventStorage {
     config match {
       case StorageConfig.None =>
         Resource.pure(NoStorage)
-      case StorageConfig.Persistent(path, maxEvents) =>
-        SqliteStorage.file(path.toString, maxEvents)
-      case StorageConfig.InMemory =>
-        Resource.pure(new InMemoryStorage())
+      case StorageConfig.Persistent(path, _, _) =>
+        SqliteStorage.file(path.toString)
+      case StorageConfig.InMemory(maxEvents) =>
+        Resource.pure(new InMemoryStorage(maxEvents))
     }
   }
 

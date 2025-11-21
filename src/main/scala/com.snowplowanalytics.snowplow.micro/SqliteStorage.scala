@@ -16,17 +16,18 @@ import doobie._
 import doobie.implicits._
 import doobie.hikari.HikariTransactor
 import io.circe.parser
+import org.typelevel.log4cats.Logger
+import org.typelevel.log4cats.slf4j.Slf4jLogger
 
 import java.sql.Timestamp
 import java.time.Instant
 import java.util.concurrent.Executors
 import scala.concurrent.ExecutionContext
-import scala.util.Random
 
 /** SQLite-based event storage.
  * Only stores the Analytics SDK JSON representation of valid and failed (incomplete) events.
   */
-private[micro] class SqliteStorage(xa: Transactor[IO], maxEvents: Option[Int]) extends EventStorage {
+private[micro] class SqliteStorage(xa: Transactor[IO]) extends EventStorage {
   import SqliteStorage._
 
   /** Add events to SQLite storage. */
@@ -55,20 +56,7 @@ private[micro] class SqliteStorage(xa: Transactor[IO], maxEvents: Option[Int]) e
         ().pure[ConnectionIO]
       }
 
-      val cleanupProgram = maxEvents.fold(().pure[ConnectionIO]) { limit =>
-        // Probabilistic cleanup to avoid excessive overhead
-        // We want to stay close to the limit, so:
-        //   * For a limit of 100 or less, run every batch
-        //   * For a limit of 10k, run every 100 batches (1%)
-        //   * For a limit of 100k, run every 1000 batches (1%)
-        if (Random.nextDouble() < (100 / limit)) {
-          cleanupOldEvents(limit)
-        } else {
-          ().pure[ConnectionIO]
-        }
-      }
-
-      (insertEventsProgram *> insertColumnsProgram *> cleanupProgram).transact(xa).void
+      (insertEventsProgram *> insertColumnsProgram).transact(xa).void
     } else {
       IO.unit
     }
@@ -253,6 +241,19 @@ private[micro] class SqliteStorage(xa: Transactor[IO], maxEvents: Option[Int]) e
       EventsResponse(events, totalPages, totalItems, approximateCount)
     }
   }
+
+  def cleanupExpiredEvents(ttl: java.time.Duration): IO[Unit] = {
+    implicit val logger: Logger[IO] = Slf4jLogger.getLogger[IO]
+    val cutoffTime = Instant.now().minus(ttl)
+    logger.info(s"Running TTL cleanup: deleting events older than $cutoffTime (TTL: $ttl)") *>
+    sql"DELETE FROM events WHERE timestamp < $cutoffTime"
+      .update
+      .run
+      .transact(xa)
+      .flatMap { deletedCount =>
+        logger.info(s"TTL cleanup completed: deleted $deletedCount events")
+      }
+  }
 }
 
 private[micro] object SqliteStorage {
@@ -278,7 +279,7 @@ private[micro] object SqliteStorage {
   }
 
   /** Create SQLite storage with file-based database. */
-  def file(dbPath: String, maxEvents: Option[Int]): Resource[IO, SqliteStorage] = {
+  def file(dbPath: String): Resource[IO, SqliteStorage] = {
     val params = List(
       "journal_mode=WAL",   // Write-Ahead Logging for better concurrency
       "busy_timeout=30000", // Wait up to 30 seconds instead of immediate BUSY error
@@ -287,10 +288,10 @@ private[micro] object SqliteStorage {
       "temp_store=MEMORY"   // Use memory for temporary tables
     )
     val url = s"jdbc:sqlite:$dbPath?${params.mkString("&")}"
-    create(url, maxEvents)
+    create(url)
   }
 
-  private def create(url: String, maxEvents: Option[Int]): Resource[IO, SqliteStorage] = {
+  private def create(url: String): Resource[IO, SqliteStorage] = {
     for {
       ec <- databaseExecutionContext
       xa <- HikariTransactor.newHikariTransactor[IO](
@@ -315,7 +316,7 @@ private[micro] object SqliteStorage {
         IO(System.err.println(s"Warning: Failed to configure HikariCP pool: ${err.getMessage}"))
       })
       _ <- Resource.eval(initialize(xa))
-    } yield new SqliteStorage(xa, maxEvents)
+    } yield new SqliteStorage(xa)
   }
 
   private def initialize(xa: Transactor[IO]): IO[Unit] =
@@ -353,18 +354,6 @@ private[micro] object SqliteStorage {
       )
     """.update.run.void *>
       sql"CREATE INDEX IF NOT EXISTS idx_columns_name ON columns(name)".update.run.void
-  }
-
-  private def cleanupOldEvents(limit: Int): ConnectionIO[Unit] = {
-    sql"""
-        DELETE FROM events
-        WHERE timestamp < (
-          SELECT timestamp
-          FROM events
-          ORDER BY timestamp DESC
-          LIMIT 1 OFFSET ${limit-1}
-        )
-      """.update.run.void
   }
 
   implicit val instantEpochMeta: Meta[Instant] =

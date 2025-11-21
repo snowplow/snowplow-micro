@@ -14,6 +14,7 @@ import cats.data.EitherT
 import cats.effect.{ExitCode, IO, Resource}
 import cats.effect.std.Queue
 import cats.implicits._
+import scala.concurrent.duration._
 import com.monovore.decline.Opts
 import com.snowplowanalytics.iglu.client.resolver.registries.JavaNetRegistryLookup
 import com.snowplowanalytics.snowplow.badrows.Processor
@@ -59,6 +60,32 @@ object Run {
       lookup = JavaNetRegistryLookup.ioLookupInstance[IO]
       queue <- Resource.eval(Queue.unbounded[IO, CollectorPayload])
       storage <- EventStorage.create(config.storage)
+      _ <- config.storage match {
+        case Configuration.StorageConfig.Persistent(_, ttl, cleanupInterval) =>
+          Resource.eval(logger.info(s"Configuring TTL cleanup: maxTtl=$ttl, cleanupInterval=$cleanupInterval")) *>
+          Resource.eval {
+            logger.info("Running initial TTL cleanup...") *>
+            (storage match {
+              case sqlite: SqliteStorage => sqlite.cleanupExpiredEvents(ttl)
+              case _ => IO.unit
+            })
+          } *>
+          fs2.Stream
+            .awakeEvery[IO](cleanupInterval.toMillis.milliseconds)
+            .evalMap { _ =>
+              logger.debug("Periodic TTL cleanup triggered") *>
+              (storage match {
+                case sqlite: SqliteStorage => sqlite.cleanupExpiredEvents(ttl)
+                case _ => IO.unit
+              })
+            }
+            .compile
+            .drain
+            .background
+            .void
+        case _ =>
+          Resource.unit[IO]
+      }
       microRoutes = Routing.create(config, storage, config.auth, lookup)
       sink = new EventSink(config.iglu.client, lookup, enrichmentRegistry, config.outputFormat, config.destination, badProcessor, config.enrichConfig, httpClient, storage)
       sinks = Sinks(sink, sink)
