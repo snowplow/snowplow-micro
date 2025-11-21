@@ -309,11 +309,9 @@ private[micro] object SqliteStorage {
             config.setMinimumIdle(1)           // Keep one connection alive
             config.setConnectionTimeout(30000) // 30 second connection timeout
             config.setIdleTimeout(600000)      // 10 minute idle timeout
-          case _ =>
-            ()
+          case other =>
+            throw new IllegalStateException(s"Expected HikariDataSource but got ${other.getClass.getName}")
         }
-      }.handleErrorWith { err =>
-        IO(System.err.println(s"Warning: Failed to configure HikariCP pool: ${err.getMessage}"))
       })
       _ <- Resource.eval(initialize(xa))
     } yield new SqliteStorage(xa)
