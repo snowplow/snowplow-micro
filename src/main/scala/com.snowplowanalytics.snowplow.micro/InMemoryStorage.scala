@@ -14,7 +14,6 @@ import cats.effect.IO
 import com.snowplowanalytics.snowplow.micro.model.ColumnStatsResponse
 import io.circe.Json
 
-import java.time.temporal.ChronoUnit
 
 /** In-memory cache containing the results of the validation (or not) of the tracking events.
   * Good events are stored with their type, their schema and their contexts, if any,
@@ -99,17 +98,20 @@ private[micro] class InMemoryStorage extends EventStorage {
     }
   }
 
-  override def getTimeline: IO[TimelineData] = IO.delay {
-    val groupedByMinute = LockGood.synchronized {
-      good.groupBy(event => event.event.collector_tstamp.truncatedTo(ChronoUnit.MINUTES))
-        .map {
-          case (minute, events) =>
-            val (failed, valid) = events.partition(_.incomplete)
-            TimelinePoint(valid.size, failed.size, minute)
-        }.toList
+  override def getTimeline(request: TimelineRequest): IO[TimelineData] = IO.delay {
+    val allEvents = getGoodAndIncomplete
+
+    val points = request.buckets.map { bucket =>
+      val eventsInBucket = allEvents.filter { event =>
+        val timestamp = event.event.collector_tstamp
+        !timestamp.isBefore(bucket.start) && timestamp.isBefore(bucket.end)
+      }
+
+      val (failed, valid) = eventsInBucket.partition(_.incomplete)
+      TimelinePoint(valid.size, failed.size, bucket)
     }
-    val filledPoints = EventStorage.fillMissingMinutes(groupedByMinute)
-    TimelineData(filledPoints)
+
+    TimelineData(points)
   }
 
   override def getColumnStats(columns: List[String]): IO[ColumnStatsResponse] = {

@@ -3,10 +3,19 @@ export type Event = {
   [key: string]: any
 }
 
+export type TimelineBucket = {
+  start: number
+  end: number
+}
+
+export type TimelineRequest = {
+  buckets: TimelineBucket[]
+}
+
 export type TimelinePoint = {
   validEvents: number
   failedEvents: number
-  timestamp: number
+  bucket: TimelineBucket
 }
 
 export type TimelineData = {
@@ -134,14 +143,16 @@ export class EventsApiService {
   /**
    * Fetch timeline data from the backend
    */
-  static async fetchTimeline(token?: string | null): Promise<TimelineData> {
+  static async fetchTimeline(request: TimelineRequest, token?: string | null): Promise<TimelineData> {
     const url = new URL('/micro/timeline', window.location.origin)
 
     const response = await this.makeRequest(url.toString(), {
-      method: 'GET',
+      method: 'POST',
       headers: {
         Accept: 'application/json',
+        'Content-Type': 'application/json',
       },
+      body: JSON.stringify(request),
     }, token)
 
     if (!response.ok) {
@@ -176,5 +187,54 @@ export class EventsApiService {
 
     const data = await response.json()
     return data as ColumnStatsResponse
+  }
+
+  /**
+   * Generate time buckets for timeline requests
+   * @param bucketCount Number of buckets to generate
+   * @param bucketSizeMs Size of each bucket in milliseconds
+   */
+  static generateTimeline(bucketCount: number, bucketSizeMs: number): TimelineRequest {
+    const now = new Date()
+    // Always align to UTC boundaries for consistency
+    const currentTime = now.getTime()
+    const alignedTime = Math.floor(currentTime / bucketSizeMs) * bucketSizeMs
+
+    const buckets: TimelineBucket[] = []
+    for (let i = 0; i < bucketCount; i++) {
+      const bucketStart = alignedTime - i * bucketSizeMs
+      const bucketEnd = bucketStart + bucketSizeMs
+      buckets.push({
+        start: bucketStart,
+        end: bucketEnd
+      })
+    }
+
+    return { buckets: buckets.reverse() } // Most recent first
+  }
+
+  /**
+   * Generate combined timeline request with both minute and weekly buckets
+   */
+  static generateCombinedTimeline(): TimelineRequest {
+    const minuteBuckets = this.generateTimeline(30, 60 * 1000).buckets // 30 buckets, 1 minute each
+    const weeklyBuckets = this.generateTimeline(28, 6 * 60 * 60 * 1000).buckets // 28 buckets, 6 hours each
+
+    return {
+      buckets: [...minuteBuckets, ...weeklyBuckets]
+    }
+  }
+
+  /**
+   * Split combined timeline response back into minutes and days timelines
+   */
+  static splitTimelineResponse(response: TimelineData): { minutes: TimelineData, days: TimelineData } {
+    const minutePoints = response.points.slice(0, 30) // First 30 are minute buckets
+    const dayPoints = response.points.slice(30, 58) // Next 28 are 6-hour buckets (7 days)
+
+    return {
+      minutes: { points: minutePoints },
+      days: { points: dayPoints }
+    }
   }
 }

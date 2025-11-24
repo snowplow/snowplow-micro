@@ -42,7 +42,7 @@ type DataTableProps = {
   selectedCellId: string | null
   columnFilters: ColumnFiltersState
   setColumnFilters: OnChangeFn<ColumnFiltersState>
-  selectedMinute: string | null
+  selectedTimeBucket: string | null
   onJsonCellToggle: (cellId: string, value: any, title: string) => void
   onReorderColumns: (fromIndex: number, toIndex: number) => void
   onRowClick: (rowId: string, event: Event) => void
@@ -63,7 +63,7 @@ export function DataTable({
   selectedCellId,
   columnFilters,
   setColumnFilters,
-  selectedMinute,
+  selectedTimeBucket,
   onJsonCellToggle,
   onReorderColumns,
   onRowClick,
@@ -241,9 +241,9 @@ export function DataTable({
                     >
                       {(() => {
                         const hasColumnFilters = columnFilters.length > 0
-                        const hasSelectedMinute = selectedMinute !== null
+                        const hasSelectedTimeBucket = selectedTimeBucket !== null
 
-                        if (hasColumnFilters && hasSelectedMinute) {
+                        if (hasColumnFilters && hasSelectedTimeBucket) {
                           return 'No events matching filters and selected time'
                         } else if (hasColumnFilters) {
                           return 'No events matching filters'

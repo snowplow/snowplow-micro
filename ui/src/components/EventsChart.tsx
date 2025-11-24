@@ -9,8 +9,9 @@ import { type TimelineData } from '@/services/api'
 
 interface EventsChartProps {
   timelineData: TimelineData
-  selectedMinute: string | null
-  onMinuteClick: (minute: string | null) => void
+  selectedBucket: string | null
+  onBucketClick: (bucketKey: string | null) => void
+  timeFormat: (date: Date) => string
 }
 
 const chartConfig = {
@@ -26,23 +27,21 @@ const chartConfig = {
 
 export function EventsChart({
   timelineData,
-  selectedMinute,
-  onMinuteClick,
+  selectedBucket,
+  onBucketClick,
+  timeFormat,
 }: EventsChartProps) {
   const [barHovered, setBarHovered] = useState(false)
 
   const chartData = useMemo(() => {
     return timelineData.points.map(point => ({
-      minute: new Date(point.timestamp).toLocaleTimeString('en-US', {
-        hour12: false,
-        hour: '2-digit',
-        minute: '2-digit',
-      }),
+      label: timeFormat(new Date(point.bucket.start)),
       validEvents: point.validEvents,
       failedEvents: point.failedEvents,
-      timestamp: point.timestamp,
-    })).reverse()
-  }, [timelineData])
+      bucketStart: point.bucket.start,
+      bucketEnd: point.bucket.end,
+    }))
+  }, [timelineData, timeFormat])
 
   const handleChartClick = (event: any) => {
     if (event && event.activePayload && event.activePayload.length > 0) {
@@ -51,23 +50,23 @@ export function EventsChart({
       // Check if we actually have events at this time point
       if (data.validEvents > 0 || data.failedEvents > 0) {
         // Clicking on a bar with actual data - toggle selection
-        const minuteKey = new Date(data.timestamp).toISOString()
-        onMinuteClick(selectedMinute === minuteKey ? null : minuteKey)
+        const bucketKey = `${data.bucketStart}-${data.bucketEnd}`
+        onBucketClick(selectedBucket === bucketKey ? null : bucketKey)
       } else {
         // Clicking on empty area (no events at this time) - reset selection
-        onMinuteClick(null)
+        onBucketClick(null)
       }
     } else {
       // Clicking on empty area - reset selection
-      onMinuteClick(null)
+      onBucketClick(null)
     }
   }
 
   const getBarOpacity = (index: number): number => {
     const data = chartData[index]
-    const minuteKey = new Date(data.timestamp).toISOString()
-    if (selectedMinute === minuteKey) return 1.0
-    if (selectedMinute && selectedMinute !== minuteKey) return 0.2
+    const bucketKey = `${data.bucketStart}-${data.bucketEnd}`
+    if (selectedBucket === bucketKey) return 1.0
+    if (selectedBucket && selectedBucket !== bucketKey) return 0.2
     return 0.8
   }
 
@@ -109,19 +108,22 @@ export function EventsChart({
             </pattern>
           </defs>
           <XAxis
-            dataKey="minute"
+            dataKey="label"
             axisLine={false}
             tickLine={false}
             fontSize={12}
           />
           <ChartTooltip
+            wrapperStyle={{zIndex: 20}}
             content={({ active, payload }) => {
               if (active && payload && payload.length > 0 && barHovered) {
                 const data = payload[0].payload
+                const startTime = new Date(data.bucketStart)
+                const endTime = new Date(data.bucketEnd)
                 return (
                   <div className="bg-gray-900 text-white px-3 py-2 rounded shadow-lg text-sm">
                     <div className="font-medium mb-1">
-                      {new Date(data.timestamp).toLocaleString()}
+                      {startTime.toLocaleString()} - {endTime.toLocaleTimeString()}
                     </div>
                     <div className="space-y-1">
                       {data.validEvents > 0 && (

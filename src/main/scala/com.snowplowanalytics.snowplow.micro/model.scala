@@ -53,7 +53,9 @@ private [micro] final case class FiltersBad(
 private [micro] final case class ValidationSummary(total: Int, good: Int, bad: Int)
 
 /** Timeline data structures for /micro/timeline endpoint. */
-final case class TimelinePoint(validEvents: Int, failedEvents: Int, timestamp: Instant)
+final case class TimelineBucket(start: Instant, end: Instant)
+final case class TimelineRequest(buckets: List[TimelineBucket])
+final case class TimelinePoint(validEvents: Int, failedEvents: Int, bucket: TimelineBucket)
 final case class TimelineData(points: List[TimelinePoint])
 
 /** Column statistics data structures for /micro/columnStats endpoint. */

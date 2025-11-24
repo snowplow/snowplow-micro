@@ -188,41 +188,58 @@ trait EventStorageTimelineSpec {
 
   import InMemoryStorageSpec._
 
+  // Helper function to create timeline requests for testing
+  def createTestTimelineRequest(bucketCount: Int): TimelineRequest = {
+    val now = java.time.Instant.now()
+    val buckets = (0 until bucketCount).map { i =>
+      val start = now.minusSeconds((i + 1) * 60L) // 1 minute buckets going backwards
+      val end = start.plusSeconds(60L)
+      TimelineBucket(start, end)
+    }.reverse.toList // Most recent first
+    TimelineRequest(buckets)
+  }
+
   def timelineTests(storageResource: Resource[IO, EventStorage], storageName: String): Fragment = {
     s"$storageName getTimeline" >> {
       "should return empty timeline for empty storage" >> {
         storageResource.use { storage =>
-          storage.getTimeline.map { timeline =>
-            timeline.points must have size(31)
+          val request = createTestTimelineRequest(3) // Create 3 test buckets
+          storage.getTimeline(request).map { timeline =>
+            timeline.points must have size(3)
             timeline.points.forall(p => p.validEvents == 0 && p.failedEvents == 0) must beTrue
           }
         }.unsafeRunSync()
       }
 
-      "should return timeline with events grouped by minute" >> {
+      "should return timeline with events grouped by buckets" >> {
         storageResource.use { storage =>
           for {
             _ <- storage.addToGood(List(GoodEvent3, GoodEvent2, GoodEvent1))
-            timeline <- storage.getTimeline
+            // Create buckets that span the event timestamps
+            buckets = List(
+              TimelineBucket(GoodEvent1.event.collector_tstamp.truncatedTo(ChronoUnit.MINUTES),
+                           GoodEvent1.event.collector_tstamp.truncatedTo(ChronoUnit.MINUTES).plusSeconds(60)),
+              TimelineBucket(GoodEvent3.event.collector_tstamp.truncatedTo(ChronoUnit.MINUTES),
+                           GoodEvent3.event.collector_tstamp.truncatedTo(ChronoUnit.MINUTES).plusSeconds(60))
+            )
+            request = TimelineRequest(buckets)
+            timeline <- storage.getTimeline(request)
           } yield {
-            timeline.points must have size(31)
+            timeline.points must have size(2)
 
             val pointsWithEvents = timeline.points.filter(p => p.validEvents > 0 || p.failedEvents > 0)
-            pointsWithEvents must have size(2) // GoodEvent1 & GoodEvent2 in same minute, GoodEvent3 in different minute
+            pointsWithEvents must have size(2) // GoodEvent1 & GoodEvent2 in same bucket, GoodEvent3 in different bucket
 
-            val eventMinute12 = GoodEvent1.event.collector_tstamp.truncatedTo(ChronoUnit.MINUTES)
-            val eventMinute3 = GoodEvent3.event.collector_tstamp.truncatedTo(ChronoUnit.MINUTES)
-
-            val minute12Point = pointsWithEvents.find(_.timestamp == eventMinute12)
-            val minute3Point = pointsWithEvents.find(_.timestamp == eventMinute3)
+            val minute12Point = pointsWithEvents.find(_.bucket == buckets(0))
+            val minute3Point = pointsWithEvents.find(_.bucket == buckets(1))
 
             minute12Point must beSome
             minute3Point must beSome
 
-            minute12Point.get.validEvents must_== 2
+            minute12Point.get.validEvents must_== 2 // GoodEvent1 and GoodEvent2 are in the same minute
             minute12Point.get.failedEvents must_== 0
 
-            minute3Point.get.validEvents must_== 1
+            minute3Point.get.validEvents must_== 1 // GoodEvent3
             minute3Point.get.failedEvents must_== 0
           }
         }.unsafeRunSync()
@@ -233,39 +250,54 @@ trait EventStorageTimelineSpec {
         storageResource.use { storage =>
           for {
             _ <- storage.addToGood(List(failedEvent, GoodEvent2, GoodEvent1))
-            timeline <- storage.getTimeline
+            // Create buckets that span the event timestamps
+            buckets = List(
+              TimelineBucket(GoodEvent1.event.collector_tstamp.truncatedTo(ChronoUnit.MINUTES),
+                           GoodEvent1.event.collector_tstamp.truncatedTo(ChronoUnit.MINUTES).plusSeconds(60)),
+              TimelineBucket(failedEvent.event.collector_tstamp.truncatedTo(ChronoUnit.MINUTES),
+                           failedEvent.event.collector_tstamp.truncatedTo(ChronoUnit.MINUTES).plusSeconds(60))
+            )
+            request = TimelineRequest(buckets)
+            timeline <- storage.getTimeline(request)
           } yield {
-            timeline.points must have size(31)
+            timeline.points must have size(2)
 
             val pointsWithEvents = timeline.points.filter(p => p.validEvents > 0 || p.failedEvents > 0)
             pointsWithEvents must have size(2)
 
-            val eventMinute12 = GoodEvent1.event.collector_tstamp.truncatedTo(ChronoUnit.MINUTES)
-            val eventMinute3 = failedEvent.event.collector_tstamp.truncatedTo(ChronoUnit.MINUTES)
-
-            val minute12Point = pointsWithEvents.find(_.timestamp == eventMinute12)
-            val minute3Point = pointsWithEvents.find(_.timestamp == eventMinute3)
+            val minute12Point = pointsWithEvents.find(_.bucket == buckets(0))
+            val minute3Point = pointsWithEvents.find(_.bucket == buckets(1))
 
             minute12Point must beSome
             minute3Point must beSome
 
-            minute12Point.get.validEvents must_== 2
+            minute12Point.get.validEvents must_== 2 // GoodEvent1 and GoodEvent2
             minute12Point.get.failedEvents must_== 0
 
             minute3Point.get.validEvents must_== 0
-            minute3Point.get.failedEvents must_== 1
+            minute3Point.get.failedEvents must_== 1 // failedEvent
           }
         }.unsafeRunSync()
       }
 
-      "should return timeline ordered by timestamp descending" >> {
+      "should return timeline points in bucket order" >> {
         storageResource.use { storage =>
           for {
             _ <- storage.addToGood(List(GoodEvent1, GoodEvent2, GoodEvent3))
-            timeline <- storage.getTimeline
+            // Create 3 specific buckets in a known order
+            buckets = List(
+              TimelineBucket(java.time.Instant.ofEpochSecond(1761686340), java.time.Instant.ofEpochSecond(1761686400)), // Before Event1
+              TimelineBucket(java.time.Instant.ofEpochSecond(1761686400), java.time.Instant.ofEpochSecond(1761686460)), // Covers Event1 & Event2
+              TimelineBucket(java.time.Instant.ofEpochSecond(1761686520), java.time.Instant.ofEpochSecond(1761686580))  // Covers Event3
+            )
+            request = TimelineRequest(buckets)
+            timeline <- storage.getTimeline(request)
           } yield {
-            timeline.points must have size(31)
-            timeline.points.map(_.timestamp.toEpochMilli) must beSorted(Ordering.Long.reverse)
+            timeline.points must have size(3)
+            // Timeline points should match the bucket order provided in the request
+            timeline.points.zip(request.buckets).forall { case (point, bucket) =>
+              point.bucket == bucket
+            } must beTrue
           }
         }.unsafeRunSync()
       }

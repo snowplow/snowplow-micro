@@ -83,36 +83,43 @@ private[micro] class SqliteStorage(readXa: Transactor[IO], writeXa: Transactor[I
       .transact(readXa)
   }
 
-  override def getTimeline: IO[TimelineData] = {
+  override def getTimeline(request: TimelineRequest): IO[TimelineData] = {
+    if (request.buckets.isEmpty) {
+      return IO.pure(TimelineData(List.empty))
+    }
+
+    // Create a VALUES clause with all bucket ranges
+    val bucketValues = request.buckets.zipWithIndex.map { case (bucket, idx) =>
+      s"(${bucket.start.toEpochMilli}, ${bucket.end.toEpochMilli}, $idx)"
+    }.mkString(", ")
+
     val query = sql"""
-      WITH latest_event AS (
-        SELECT COALESCE(MAX(timestamp), ${System.currentTimeMillis()}) as max_timestamp FROM events
-      ),
-      time_range AS (
-        SELECT
-          (max_timestamp / 60000) * 60000 as latest_minute,
-          (max_timestamp / 60000) * 60000 - 30 * 60000 as start_minute
-        FROM latest_event
-      ),
-      sparse_data AS (
-        SELECT
-          (timestamp / 60000) * 60000 as minute,
-          COUNT(CASE WHEN NOT failed THEN 1 END) as valid_count,
-          COUNT(CASE WHEN failed THEN 1 END) as failed_count
-        FROM events, time_range
-        WHERE timestamp >= time_range.start_minute AND timestamp < (time_range.latest_minute + 60000)
-        GROUP BY minute
+      WITH buckets(bucket_start, bucket_end, bucket_order) AS (
+        VALUES """ ++ Fragment.const(bucketValues) ++ sql"""
       )
-      SELECT minute, valid_count, failed_count FROM sparse_data ORDER BY minute DESC
+      SELECT
+        bucket_start,
+        bucket_end,
+        bucket_order,
+        COUNT(CASE WHEN events.failed = 0 THEN 1 END) as valid_count,
+        COUNT(CASE WHEN events.failed = 1 THEN 1 END) as failed_count
+      FROM buckets
+      LEFT JOIN events ON events.timestamp >= buckets.bucket_start
+                     AND events.timestamp < buckets.bucket_end
+      GROUP BY bucket_start, bucket_end, bucket_order
+      ORDER BY bucket_order
     """
 
     query
-      .query[TimelinePoint]
+      .query[(Long, Long, Int, Int, Int)]
       .to[List]
       .transact(readXa)
-      .map { sparsePoints =>
-        val filledPoints = EventStorage.fillMissingMinutes(sparsePoints)
-        TimelineData(filledPoints)
+      .map { results =>
+        val points = results.map { case (start, end, _, validCount, failedCount) =>
+          val bucket = TimelineBucket(Instant.ofEpochMilli(start), Instant.ofEpochMilli(end))
+          TimelinePoint(validCount, failedCount, bucket)
+        }
+        TimelineData(points)
       }
   }
 
@@ -340,9 +347,4 @@ private[micro] object SqliteStorage {
 
   implicit val instantEpochMeta: Meta[Instant] =
     Meta[Timestamp].timap(_.toInstant)(Timestamp.from)
-
-  implicit val timelinePointRead: Read[TimelinePoint] =
-    Read[(Instant, Int, Int)].map { case (timestamp, validEvents, failedEvents) =>
-      TimelinePoint(validEvents, failedEvents, timestamp)
-    }
 }
