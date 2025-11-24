@@ -15,8 +15,6 @@ import com.snowplowanalytics.snowplow.micro.Configuration.StorageConfig
 import com.snowplowanalytics.snowplow.micro.model.ColumnStatsResponse
 import io.circe.Json
 
-import java.time.Instant
-import java.time.temporal.ChronoUnit
 import scala.collection.mutable
 
 trait EventStorage {
@@ -24,7 +22,7 @@ trait EventStorage {
   def addToBad(events: List[BadEvent]): IO[Unit]
   def reset(): IO[Unit]
   def getColumns: IO[List[String]]
-  def getTimeline: IO[TimelineData]
+  def getTimeline(request: TimelineRequest): IO[TimelineData]
   def getColumnStats(columns: List[String]): IO[ColumnStatsResponse]
   def getFilteredEvents(request: EventsRequest): IO[EventsResponse]
 }
@@ -34,7 +32,10 @@ object NoStorage extends EventStorage {
   def addToBad(events: List[BadEvent]): IO[Unit] = IO.unit
   def reset(): IO[Unit] = IO.unit
   def getColumns: IO[List[String]] = IO.pure(List.empty)
-  def getTimeline: IO[TimelineData] = IO.pure(TimelineData(List.empty))
+  def getTimeline(request: TimelineRequest): IO[TimelineData] = {
+    val emptyPoints = request.buckets.map(bucket => TimelinePoint(0, 0, bucket))
+    IO.pure(TimelineData(emptyPoints))
+  }
   def getColumnStats(columns: List[String]): IO[ColumnStatsResponse] = IO.pure(Map.empty)
   def getFilteredEvents(request: EventsRequest): IO[EventsResponse] = IO.pure(EventsResponse(List.empty, 0, 0))
 }
@@ -54,16 +55,6 @@ object EventStorage {
     }
   }
 
-  def fillMissingMinutes(points: List[TimelinePoint]): List[TimelinePoint] = {
-    // the first point is the latest one
-    val latestTime = points.headOption.fold(Instant.now().truncatedTo(ChronoUnit.MINUTES))(_.timestamp)
-    val pointMap = points.map(p => p.timestamp -> p).toMap
-
-    (0L to 30L).toList.map { delta =>
-      val minute = latestTime.minus(delta, ChronoUnit.MINUTES)
-      pointMap.getOrElse(minute, TimelinePoint(0, 0, minute))
-    }
-  }
 
   def isTimestampColumn(column: String): Boolean = column.endsWith("_tstamp")
   def isContextsColumn(column: String): Boolean = column.startsWith("contexts_")
