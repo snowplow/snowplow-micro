@@ -23,11 +23,13 @@ import java.sql.Timestamp
 import java.time.Instant
 import java.util.concurrent.Executors
 import scala.concurrent.ExecutionContext
+import scala.concurrent.duration._
 
 /** SQLite-based event storage.
  * Only stores the Analytics SDK JSON representation of valid and failed (incomplete) events.
+ * Uses separate transactors for reads and writes to allow concurrent access in WAL mode.
   */
-private[micro] class SqliteStorage(xa: Transactor[IO]) extends EventStorage {
+private[micro] class SqliteStorage(readXa: Transactor[IO], writeXa: Transactor[IO]) extends EventStorage {
   import SqliteStorage._
 
   /** Add events to SQLite storage. */
@@ -60,7 +62,7 @@ private[micro] class SqliteStorage(xa: Transactor[IO]) extends EventStorage {
         ().pure[ConnectionIO]
       }
 
-      (insertEventsProgram *> insertColumnsProgram).transact(xa).void
+      (insertEventsProgram *> insertColumnsProgram).transact(writeXa).void
     } else {
       IO.unit
     }
@@ -71,14 +73,14 @@ private[micro] class SqliteStorage(xa: Transactor[IO]) extends EventStorage {
 
   /** Reset storage by deleting all events. */
   override def reset(): IO[Unit] = {
-    (sql"DELETE FROM events".update.run *> sql"DELETE FROM columns".update.run).transact(xa).void
+    (sql"DELETE FROM events".update.run *> sql"DELETE FROM columns".update.run).transact(writeXa).void
   }
 
   override def getColumns: IO[List[String]] = {
     sql"SELECT name FROM columns ORDER BY name"
       .query[String]
       .to[List]
-      .transact(xa)
+      .transact(readXa)
   }
 
   override def getTimeline: IO[TimelineData] = {
@@ -107,7 +109,7 @@ private[micro] class SqliteStorage(xa: Transactor[IO]) extends EventStorage {
     query
       .query[TimelinePoint]
       .to[List]
-      .transact(xa)
+      .transact(readXa)
       .map { sparsePoints =>
         val filledPoints = EventStorage.fillMissingMinutes(sparsePoints)
         TimelineData(filledPoints)
@@ -131,7 +133,7 @@ private[micro] class SqliteStorage(xa: Transactor[IO]) extends EventStorage {
 
       query.query[String]
         .to[List]
-        .transact(xa)
+        .transact(readXa)
         .map(values => column -> ColumnStats(values))
     }.map { stats =>
       ColumnStatsResponse(
@@ -196,8 +198,8 @@ private[micro] class SqliteStorage(xa: Transactor[IO]) extends EventStorage {
       fr"LIMIT ${safePageSize} OFFSET ${offset}"
 
     for {
-      totalItems <- countQuery.query[Int].unique.transact(xa)
-      jsonStrings <- dataQuery.query[String].to[List].transact(xa)
+      totalItems <- countQuery.query[Int].unique.transact(readXa)
+      jsonStrings <- dataQuery.query[String].to[List].transact(readXa)
       events <- jsonStrings.traverse { jsonStr =>
         IO.fromEither(parser.parse(jsonStr))
       }
@@ -214,7 +216,7 @@ private[micro] class SqliteStorage(xa: Transactor[IO]) extends EventStorage {
     sql"DELETE FROM events WHERE timestamp < $cutoffTime"
       .update
       .run
-      .transact(xa)
+      .transact(writeXa)
       .flatMap { deletedCount =>
         logger.info(s"TTL cleanup completed: deleted $deletedCount events")
       }
@@ -230,10 +232,10 @@ private[micro] object SqliteStorage {
   // Tunable: increase for more coverage, decrease for better performance
   private val COLUMN_STATS_SCAN_LIMIT = 1000
 
-  private def databaseExecutionContext: Resource[IO, ExecutionContext] = {
+  private def databaseExecutionContext(size: Int): Resource[IO, ExecutionContext] = {
     Resource.make(
       IO {
-        val executor = Executors.newFixedThreadPool(5)
+        val executor = Executors.newFixedThreadPool(size)
         (ExecutionContext.fromExecutor(executor), executor)
       }
     ) { case (_, executor) =>
@@ -261,28 +263,45 @@ private[micro] object SqliteStorage {
 
   private def create(url: String): Resource[IO, SqliteStorage] = {
     for {
-      ec <- databaseExecutionContext
-      xa <- HikariTransactor.newHikariTransactor[IO](
+      // Write transactor: single connection (SQLite only allows 1 writer anyway)
+      writeEc <- databaseExecutionContext(1)
+      writeXa <- HikariTransactor.newHikariTransactor[IO](
         driverClassName = "org.sqlite.JDBC",
         url = url,
-        user = "", // SQLite doesn't use user/password
+        user = "",
         pass = "",
-        connectEC = ec
+        connectEC = writeEc
       )
-      _ <- Resource.eval(IO {
-        xa.kernel match {
-          case ds: com.zaxxer.hikari.HikariDataSource =>
-            val config = ds.getHikariConfigMXBean
-            config.setMaximumPoolSize(5)       // Allow multiple concurrent readers (WAL mode supports this)
-            config.setMinimumIdle(1)           // Keep one connection alive
-            config.setConnectionTimeout(30000) // 30 second connection timeout
-            config.setIdleTimeout(600000)      // 10 minute idle timeout
-          case other =>
-            throw new IllegalStateException(s"Expected HikariDataSource but got ${other.getClass.getName}")
-        }
-      })
-      _ <- Resource.eval(initialize(xa))
-    } yield new SqliteStorage(xa)
+      _ <- Resource.eval(configureDataSource(writeXa, maxPoolSize = 1))
+
+      // Read transactor: multiple connections for concurrent reads (WAL mode supports this)
+      readEc <- databaseExecutionContext(4)
+      readXa <- HikariTransactor.newHikariTransactor[IO](
+        driverClassName = "org.sqlite.JDBC",
+        url = url,
+        user = "",
+        pass = "",
+        connectEC = readEc
+      )
+      _ <- Resource.eval(configureDataSource(readXa, maxPoolSize = 4))
+
+      _ <- Resource.eval(initialize(writeXa))
+      // Grace period on shutdown: wait for in-flight operations before transactors close
+      _ <- Resource.onFinalize(IO.sleep(2.seconds))
+    } yield new SqliteStorage(readXa, writeXa)
+  }
+
+  private def configureDataSource(xa: HikariTransactor[IO], maxPoolSize: Int): IO[Unit] = IO {
+    xa.kernel match {
+      case ds: com.zaxxer.hikari.HikariDataSource =>
+        val config = ds.getHikariConfigMXBean
+        config.setMaximumPoolSize(maxPoolSize)
+        config.setMinimumIdle(1)
+        config.setConnectionTimeout(30000)  // 30 second connection timeout
+        config.setIdleTimeout(600000)       // 10 minute idle timeout
+      case other =>
+        throw new IllegalStateException(s"Expected HikariDataSource but got ${other.getClass.getName}")
+    }
   }
 
   private def initialize(xa: Transactor[IO]): IO[Unit] =
