@@ -56,6 +56,9 @@ function App() {
   const [columnStats, setColumnStats] = useState<Record<string, ColumnStats>>(
     {}
   )
+  const [sortableColumns, setSortableColumns] = useState<string[] | undefined>(
+    undefined
+  )
   const [sorting, setSorting] = useState<SortingState>([])
 
   // Handle scrolling to newly added columns
@@ -77,8 +80,9 @@ function App() {
   const updateColumnStats = async (columnNames: string[]) => {
     try {
       const token = await getAccessToken()
-      const stats = await EventsApiService.fetchColumnStats(columnNames, token)
-      setColumnStats(stats)
+      const response = await EventsApiService.fetchColumnStats(columnNames, token)
+      setColumnStats(response.stats)
+      setSortableColumns(response.sortableColumns)
     } catch (err) {
       console.warn('Failed to fetch column stats:', err)
     }
@@ -206,7 +210,8 @@ function App() {
       setEventData(fetchedEventData)
       setTimelineData(fetchedTimeline)
       setAvailableColumnNames(fetchedColumns)
-      setColumnStats(fetchedColumnStats)
+      setColumnStats(fetchedColumnStats.stats)
+      setSortableColumns(fetchedColumnStats.sortableColumns)
       setLastRefreshTime(new Date())
     } catch (err) {
       console.error('Failed to refresh data:', err)
@@ -483,6 +488,7 @@ function App() {
               onRowClick={handleRowClick}
               selectedRowId={selectedRowId}
               columnStats={columnStats}
+              sortableColumns={sortableColumns}
               currentPage={currentPage}
               totalPages={eventData.totalPages}
               totalItems={eventData.totalItems}

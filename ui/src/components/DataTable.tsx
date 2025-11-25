@@ -47,6 +47,7 @@ type DataTableProps = {
   onReorderColumns: (fromIndex: number, toIndex: number) => void
   onRowClick: (rowId: string, event: Event) => void
   columnStats?: Record<string, ColumnStats>
+  sortableColumns?: string[]
   currentPage: number
   totalPages: number
   totalItems: number
@@ -68,6 +69,7 @@ export function DataTable({
   onReorderColumns,
   onRowClick,
   columnStats,
+  sortableColumns,
   currentPage,
   totalPages,
   totalItems,
@@ -85,7 +87,8 @@ export function DataTable({
       selectedCellId,
       onJsonCellToggle,
       onReorderColumns,
-      columnStats
+      columnStats,
+      sortableColumns
     )
   }, [
     selectedColumns,
@@ -93,6 +96,7 @@ export function DataTable({
     onJsonCellToggle,
     onReorderColumns,
     columnStats,
+    sortableColumns,
   ])
 
   const table = useReactTable({

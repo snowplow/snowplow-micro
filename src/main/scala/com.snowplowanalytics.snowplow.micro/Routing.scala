@@ -208,6 +208,7 @@ object Routing {
   implicit val tp: Encoder[TimelinePoint] = deriveEncoder
   implicit val td: Encoder[TimelineData] = deriveEncoder
   implicit val cs: Encoder[ColumnStats] = deriveEncoder
+  implicit val csresp: Encoder[ColumnStatsResponse] = deriveEncoder
   implicit val ef: Encoder[EventsFilter] = deriveEncoder
   implicit val tr: Encoder[TimeRange] = deriveEncoder
   implicit val es: Encoder[EventsSorting] = deriveEncoder

@@ -27,7 +27,8 @@ export function generateColumns(
   selectedCellId: string | null,
   onJsonCellToggle: (cellId: string, value: any, title: string) => void,
   onReorderColumns: (fromIndex: number, toIndex: number) => void,
-  columnStats?: Record<string, { values: string[] }>
+  columnStats?: Record<string, { values: string[] }>,
+  sortableColumns?: string[] // undefined = all columns sortable (memory mode)
 ): EventColumnDef[] {
   const columns: EventColumnDef[] = []
 
@@ -99,7 +100,12 @@ export function generateColumns(
   selectedColumns.forEach((columnMetadata, index) => {
     const { name: fieldName } = columnMetadata
 
-    // Use backend columnStats if available, otherwise no autocomplete
+    // Check if this column supports sorting/filtering
+    // If sortableColumns is undefined, all columns are sortable (memory mode)
+    // If sortableColumns is defined, only those columns are sortable (SQLite mode)
+    const isSortable =
+      sortableColumns === undefined || sortableColumns.includes(fieldName)
+    const isFilterable = columnStats?.[fieldName] !== undefined
     const distinctValues = columnStats?.[fieldName]?.values ?? []
     const useAutocomplete = distinctValues.length > 0
 
@@ -113,9 +119,13 @@ export function generateColumns(
       header: ({ column }) => {
         return (
           <DraggableColumn index={index} onReorder={onReorderColumns}>
-            {columnMetadata.isJSON ?
-              // Sorting currently not supported for complex columns
-              <TruncatedColumnName className="px-2" columnMetadata={columnMetadata} /> :
+            {columnMetadata.isJSON || !isSortable ? (
+              // Sorting not supported for complex columns or non-indexed columns
+              <TruncatedColumnName
+                className="px-2"
+                columnMetadata={columnMetadata}
+              />
+            ) : (
               <Button
                 variant="ghost"
                 onClick={() =>
@@ -135,7 +145,7 @@ export function generateColumns(
                   )}
                 </div>
               </Button>
-            }
+            )}
           </DraggableColumn>
         )
       },
@@ -191,8 +201,9 @@ export function generateColumns(
         // Regular formatting for primitive values - use TruncatedCell for strings
         return <TruncatedCell value={String(value)} />
       },
-      enableSorting: !columnMetadata.isJSON,
-      enableColumnFilter: !columnMetadata.isTimestamp && !columnMetadata.isJSON,
+      enableSorting: !columnMetadata.isJSON && isSortable,
+      enableColumnFilter:
+        !columnMetadata.isTimestamp && !columnMetadata.isJSON && isFilterable,
     }
 
     columns.push(columnDef)

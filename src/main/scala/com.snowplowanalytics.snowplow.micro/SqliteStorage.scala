@@ -114,7 +114,7 @@ private[micro] class SqliteStorage(xa: Transactor[IO]) extends EventStorage {
       }
   }
 
-  override def getColumnStats(columns: List[String]): IO[Map[String, ColumnStats]] = {
+  override def getColumnStats(columns: List[String]): IO[ColumnStatsResponse] = {
     import SqliteStorage.COLUMN_STATS_SCAN_LIMIT
 
     // Only fetch stats for indexed columns (SQLite mode doesn't support JSON column filtering)
@@ -133,7 +133,12 @@ private[micro] class SqliteStorage(xa: Transactor[IO]) extends EventStorage {
         .to[List]
         .transact(xa)
         .map(values => column -> ColumnStats(values))
-    }.map(_.filter(_._2.values.nonEmpty).toMap)
+    }.map { stats =>
+      ColumnStatsResponse(
+        stats.filter(_._2.values.nonEmpty).toMap,
+        Some(SqliteStorage.INDEXED_COLUMNS.toList :+ "collector_tstamp")
+      )
+    }
   }
 
   override def getFilteredEvents(request: EventsRequest): IO[EventsResponse] = {
