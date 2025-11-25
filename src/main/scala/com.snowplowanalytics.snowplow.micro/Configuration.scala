@@ -50,7 +50,7 @@ object Configuration {
   sealed trait StorageConfig
   object StorageConfig {
     case object None extends StorageConfig
-    case class InMemory(maxEvents: Option[Int]) extends StorageConfig
+    case object InMemory extends StorageConfig
     case class Persistent(path: Path, maxTtl: Duration, cleanupInterval: Duration) extends StorageConfig
   }
 
@@ -79,9 +79,9 @@ object Configuration {
     private val outputTsv = Opts.flag("output-tsv", "Output events in TSV format to standard output or HTTP destination", "t").orFalse
     private val outputJson = Opts.flag("output-json", "Output events in JSON format to standard output or HTTP destination (with a separate key for each schema)", "j").orFalse
     private val destination = Opts.option[Uri]("destination", "HTTP(s) URL to send output data to (requires --output-json or --output-tsv)", "d").orNone
-    private val maxEvents = Opts.option[Int]("max-events", "Maximum number of events of each kind (good, bad) to keep in memory (setting this to 0 disables all /micro endpoints)", "m").orNone
+    private val noStorage = Opts.flag("no-storage", "Disable event storage (disables all /micro endpoints)").orFalse
     private val storagePath = Opts.option[Path]("storage", "Path to an SQLite database file for persistent storage", "s").orNone
-    private val storageMaxTtl = Opts.option[String]("storage-max-ttl", "Maximum time-to-live for events in persistent storage (HOCON duration, e.g., 1h, 7d, default: 7d)").mapValidated { str =>
+    private val storageTtl = Opts.option[String]("storage-ttl", "Time-to-live for events in persistent storage (HOCON duration, e.g., 1h, 7d, default: 7d)").mapValidated { str =>
       parseDuration(str).toValidatedNel
     }.withDefault(Duration.ofDays(7))
     private val storageCleanupInterval = Opts.option[String]("storage-cleanup-interval", "Interval for cleanup of expired events in persistent storage (HOCON duration, default: 1h)").mapValidated { str =>
@@ -100,23 +100,19 @@ object Configuration {
         case (true, true, _) => "Cannot specify both --output-tsv and --output-json".invalidNel[(OutputFormat, Option[Uri])]
       }
 
-    private val storage = (maxEvents, storagePath, storageMaxTtl, storageCleanupInterval)
+    private val storage = (noStorage, storagePath, storageTtl, storageCleanupInterval)
       .mapN { (_, _, _, _) }
       .mapValidated {
-        case (Some(0), _, _, _) =>
+        case (true, _, _, _) =>
           StorageConfig.None.validNel[String]
-        case (Some(n), _, _, _) if n < 0 =>
-          "--max-events must be a non-negative integer".invalidNel[StorageConfig]
-        case (Some(_), Some(_), _, _) =>
-          "--max-events is only applicable to in-memory storage (do not use with --storage)".invalidNel[StorageConfig]
-        case (_, _, maxTtl, _) if maxTtl.toMinutes < 5 =>
-          "--storage-max-ttl must be at least 5 minutes (5m)".invalidNel[StorageConfig]
+        case (_, _, ttl, _) if ttl.toMinutes < 5 =>
+          "--storage-ttl must be at least 5 minutes (5m)".invalidNel[StorageConfig]
         case (_, _, _, cleanupInterval) if cleanupInterval.toMinutes < 1 =>
           "--storage-cleanup-interval must be at least 1 minute (1m)".invalidNel[StorageConfig]
-        case (maxEvts, None, _, _) =>
-          StorageConfig.InMemory(maxEvts).validNel[String]
-        case (_, Some(path), maxTtl, cleanupInterval) =>
-          StorageConfig.Persistent(path, maxTtl, cleanupInterval).validNel[String]
+        case (_, None, _, _) =>
+          StorageConfig.InMemory.validNel[String]
+        case (_, Some(path), ttl, cleanupInterval) =>
+          StorageConfig.Persistent(path, ttl, cleanupInterval).validNel[String]
       }
 
     val config: Opts[Config] = (collector, iglu, output, yauaa, storage, auth).mapN {

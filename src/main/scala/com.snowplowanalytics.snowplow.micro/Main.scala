@@ -20,7 +20,7 @@ object Main
     header =
       s"""Notes:
          |    - With --storage, /micro/all, /micro/good and /micro/bad endpoints are not supported.
-         |    - With --max-events set to 0, all /micro/* API endpoints are disabled.""".stripMargin,
+         |    - With --no-storage all /micro/* API endpoints are disabled.""".stripMargin,
     version = BuildInfo.version
   ) {
   override def main: Opts[IO[ExitCode]] = Run.run()

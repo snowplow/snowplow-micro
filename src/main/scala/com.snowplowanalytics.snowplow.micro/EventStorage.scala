@@ -45,8 +45,8 @@ object EventStorage {
         Resource.pure(NoStorage)
       case StorageConfig.Persistent(path, _, _) =>
         SqliteStorage.file(path.toString)
-      case StorageConfig.InMemory(maxEvents) =>
-        Resource.pure(new InMemoryStorage(maxEvents))
+      case StorageConfig.InMemory =>
+        Resource.pure(new InMemoryStorage())
     }
   }
 

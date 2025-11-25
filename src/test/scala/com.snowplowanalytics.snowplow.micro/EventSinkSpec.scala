@@ -170,7 +170,7 @@ class EventSinkSpec extends CatsResource[IO, EventSink] with SpecificationLike {
       processor = Processor(BuildInfo.name, BuildInfo.version)
       lookup = JavaNetRegistryLookup.ioLookupInstance[IO]
       httpClient <- EmberClientBuilder.default[IO].build
-      storage = new InMemoryStorage(None)
+      storage = new InMemoryStorage()
     } yield new EventSink(igluClient, lookup, enrichmentRegistry, OutputFormat.None, None, processor, enrichConfig, httpClient, storage)
   }
 

@@ -19,12 +19,8 @@ import java.time.temporal.ChronoUnit
   * Good events are stored with their type, their schema and their contexts, if any,
   * so that they can be quickly filtered.
   * Bad events are stored with the error message(s) describing what when wrong.
-  *
-  * @param maxEvents Optional limit on the number of events to keep in memory (FIFO).
-  *                  When specified, only the most recent N events are kept.
-  *                  When None, unlimited storage is used.
   */
-private[micro] class InMemoryStorage(maxEvents: Option[Int]) extends EventStorage {
+private[micro] class InMemoryStorage extends EventStorage {
   import InMemoryStorage._
 
   protected var good = List.empty[GoodEvent]
@@ -35,20 +31,14 @@ private[micro] class InMemoryStorage(maxEvents: Option[Int]) extends EventStorag
   /** Add a good event to the cache. */
   override def addToGood(events: List[GoodEvent]): IO[Unit] = IO.delay {
     LockGood.synchronized {
-      good = maxEvents match {
-        case Some(limit) => (events ++ good).take(limit)
-        case None => events ++ good
-      }
+      good = events ++ good
     }
   }
 
   /** Add a bad event to the cache. */
   override def addToBad(events: List[BadEvent]): IO[Unit] = IO.delay {
     LockBad.synchronized {
-      bad = maxEvents match {
-        case Some(limit) => (events ++ bad).take(limit)
-        case None => events ++ bad
-      }
+      bad = events ++ bad
     }
   }
 
