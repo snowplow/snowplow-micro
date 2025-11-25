@@ -184,7 +184,7 @@ private[micro] class InMemoryStorage(maxEvents: Option[Int]) extends EventStorag
         List.empty
       }
 
-      EventsResponse(pageEvents, totalPages, totalItems, approximateCount = false)
+      EventsResponse(pageEvents, totalPages, totalItems)
     }
   }
 }

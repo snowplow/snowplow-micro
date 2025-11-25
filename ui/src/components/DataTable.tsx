@@ -50,7 +50,6 @@ type DataTableProps = {
   currentPage: number
   totalPages: number
   totalItems: number
-  approximateCount: boolean
   onPageChange: (page: number) => void
   sorting: SortingState
   onSortingChange: OnChangeFn<SortingState>
@@ -72,7 +71,6 @@ export function DataTable({
   currentPage,
   totalPages,
   totalItems,
-  approximateCount,
   onPageChange,
   sorting,
   onSortingChange,
@@ -265,16 +263,14 @@ export function DataTable({
             <div className="mt-4 flex items-center justify-between flex-shrink-0">
               {/* Row count on the left */}
               <div className="text-xs text-pagination font-light">
-                Showing {startRow}-{endRow} of {approximateCount ? '≈ ' : ''}
-                {totalItems} events
+                Showing {startRow}-{endRow} of {totalItems} events
               </div>
 
               {/* Pagination on the right */}
               {totalPages > 1 && (
                 <div className="flex items-center space-x-4">
                   <div className="text-xs text-pagination font-light">
-                    Page {currentPage} of {approximateCount ? '≈ ' : ''}
-                    {totalPages}
+                    Page {currentPage} of {totalPages}
                   </div>
                   <div className="flex items-center space-x-2">
                     <Button

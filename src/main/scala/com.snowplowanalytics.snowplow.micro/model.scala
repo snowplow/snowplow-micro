@@ -82,6 +82,5 @@ final case class EventsSorting(column: String, desc: Boolean)
 final case class EventsResponse(
   events: List[Json],
   totalPages: Int,
-  totalItems: Int,
-  approximateCount: Boolean
+  totalItems: Int
 )

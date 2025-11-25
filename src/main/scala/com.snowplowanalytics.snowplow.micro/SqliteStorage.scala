@@ -198,7 +198,7 @@ private[micro] class SqliteStorage(xa: Transactor[IO]) extends EventStorage {
       }
     } yield {
       val totalPages = Math.max(1, (totalItems + safePageSize - 1) / safePageSize)
-      EventsResponse(events, totalPages, totalItems, approximateCount = false)
+      EventsResponse(events, totalPages, totalItems)
     }
   }
 

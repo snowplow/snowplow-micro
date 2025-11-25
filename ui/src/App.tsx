@@ -36,7 +36,6 @@ function App() {
     events: [],
     totalPages: 0,
     totalItems: 0,
-    approximateCount: false,
   })
   const [currentPage, setCurrentPage] = useState(1)
   const [timelineData, setTimelineData] = useState<TimelineData>({ points: [] })
@@ -226,7 +225,7 @@ function App() {
     try {
       const token = await getAccessToken()
       await EventsApiService.resetEvents(token)
-      setEventData({ events: [], totalPages: 0, totalItems: 0, approximateCount: false })
+      setEventData({ events: [], totalPages: 0, totalItems: 0 })
       setTimelineData({ points: [] })
       setAvailableColumnNames([])
       setSelectedMinute(null)
@@ -487,7 +486,6 @@ function App() {
               currentPage={currentPage}
               totalPages={eventData.totalPages}
               totalItems={eventData.totalItems}
-              approximateCount={eventData.approximateCount}
               onPageChange={setCurrentPage}
               sorting={sorting}
               onSortingChange={setSorting}
