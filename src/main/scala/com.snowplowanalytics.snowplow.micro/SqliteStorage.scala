@@ -38,15 +38,19 @@ private[micro] class SqliteStorage(xa: Transactor[IO]) extends EventStorage {
       val eventData = events.zip(eventJsons).map { case (goodEvent, eventJson) =>
         val appId = goodEvent.event.app_id
         val eventName = goodEvent.event.event_name
-        (goodEvent.event.event_id.toString, goodEvent.event.collector_tstamp, eventJson.noSpaces, goodEvent.incomplete, appId, eventName)
+        val platform = goodEvent.event.platform
+        val nameTracker = goodEvent.event.name_tracker
+        val domainUserid = goodEvent.event.domain_userid
+        val vTracker = goodEvent.event.v_tracker
+        (goodEvent.event.event_id.toString, goodEvent.event.collector_tstamp, eventJson.noSpaces, goodEvent.incomplete, appId, eventName, platform, nameTracker, domainUserid, vTracker)
       }
 
       val allColumns = eventJsons.map(EventStorage.extractColumnsFromEvent)
         .reduce(_.union(_)).toList
 
       val insertEventsProgram = {
-        val sql = "INSERT OR IGNORE INTO events (event_id, timestamp, event_json, failed, app_id, event_name) VALUES (?, ?, ?, ?, ?, ?)"
-        Update[(String, Instant, String, Boolean, Option[String], Option[String])](sql).updateMany(eventData)
+        val sql = "INSERT OR IGNORE INTO events (event_id, timestamp, event_json, failed, app_id, event_name, platform, name_tracker, domain_userid, v_tracker) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        Update[(String, Instant, String, Boolean, Option[String], Option[String], Option[String], Option[String], Option[String], Option[String])](sql).updateMany(eventData)
       }
 
       val insertColumnsProgram = if (allColumns.nonEmpty) {
@@ -113,24 +117,17 @@ private[micro] class SqliteStorage(xa: Transactor[IO]) extends EventStorage {
   override def getColumnStats(columns: List[String]): IO[Map[String, ColumnStats]] = {
     import SqliteStorage.COLUMN_STATS_SCAN_LIMIT
 
-    // TODO: support complex columns at some point
-    val simpleColumns = columns.filterNot(col =>
-      EventStorage.isComplexColumn(col) ||
-        EventStorage.isTimestampColumn(col)
-    )
+    // Only fetch stats for indexed columns (SQLite mode doesn't support JSON column filtering)
+    val indexedColumns = columns
+      .filter(SqliteStorage.INDEXED_COLUMNS.contains)
+      .filterNot(EventStorage.isComplexColumn)
+      .filterNot(EventStorage.isTimestampColumn)
 
-    simpleColumns.parTraverse { column =>
-      val query = column match {
-        case "event_id" | "app_id" | "event_name"  =>
-          fr"SELECT DISTINCT value FROM (" ++
-            fr"SELECT" ++ Fragment.const(column) ++ fr"as value FROM events" ++
-            fr"ORDER BY timestamp DESC LIMIT ${COLUMN_STATS_SCAN_LIMIT}" ++
-          fr") WHERE value IS NOT NULL LIMIT 20"
-        case _ =>
-          fr"SELECT DISTINCT CAST(json_extract(event_json, ${"$." + column}) AS TEXT) as value FROM (" ++
-            fr"SELECT event_json FROM events ORDER BY timestamp DESC LIMIT ${COLUMN_STATS_SCAN_LIMIT}" ++
-          fr") WHERE value IS NOT NULL AND value != 'null' LIMIT 20"
-      }
+    indexedColumns.parTraverse { column =>
+      val query = fr"SELECT DISTINCT value FROM (" ++
+        fr"SELECT" ++ Fragment.const(column) ++ fr"as value FROM events" ++
+        fr"ORDER BY timestamp DESC LIMIT ${COLUMN_STATS_SCAN_LIMIT}" ++
+      fr") WHERE value IS NOT NULL LIMIT 20"
 
       query.query[String]
         .to[List]
@@ -157,88 +154,51 @@ private[micro] class SqliteStorage(xa: Transactor[IO]) extends EventStorage {
       }
     ).flatten
 
-    // TODO: support complex columns at some point
+    // Only filter on indexed columns (SQLite mode doesn't support JSON column filtering)
     val columnFilters = request.filters
+      .filter(f => SqliteStorage.INDEXED_COLUMNS.contains(f.column))
       .filterNot(f => EventStorage.isComplexColumn(f.column))
       .filter(_.value.nonEmpty) // Skip empty filter values
       .map { filter =>
-        val equals = fr"=" ++ fr"${filter.value}" ++ fr"COLLATE NOCASE"
-        filter.column match {
-          case "event_id" | "app_id" | "event_name" =>
-            fr"AND" ++ Fragment.const(filter.column) ++ equals
-          case _ =>
-            fr"AND CAST(json_extract(event_json, ${"$." + filter.column}) AS TEXT)" ++ equals
-        }
+        fr"AND" ++ Fragment.const(filter.column) ++ fr"=" ++ fr"${filter.value}" ++ fr"COLLATE NOCASE"
       }
 
     val allConditions = whereConditions ++ columnFilters
     val whereClause = allConditions.foldLeft(baseConditions)(_ ++ _)
 
-    // TODO: support complex columns at some point
+    // Only allow sorting on indexed columns (SQLite mode doesn't support JSON column sorting)
     val orderByClause = request.sorting.filterNot(s =>
       EventStorage.isComplexColumn(s.column)
+    ).filter(s => s.column == "collector_tstamp" || SqliteStorage.INDEXED_COLUMNS.contains(s.column)
     ).fold(fr"ORDER BY timestamp DESC") { sorting =>
-      val columnExpr = sorting.column match {
-        case "collector_tstamp" =>
+        val columnExpr = if (sorting.column == "collector_tstamp") {
           Fragment.const("timestamp")
-        case "event_id" | "app_id" | "event_name" =>
+        } else {
           Fragment.const(sorting.column)
-        case _ =>
-          fr"json_extract(event_json, ${"$." + sorting.column})"
+        }
+        val direction = if (sorting.desc) "DESC" else "ASC"
+        fr"ORDER BY" ++ columnExpr ++ Fragment.const(s" $direction")
       }
-      val direction = if (sorting.desc) "DESC" else "ASC"
-      fr"ORDER BY" ++ columnExpr ++ Fragment.const(s" $direction")
-    }
 
     // prevent OOM when an unreasonably large page size is supplied
     // the UI only uses 50 currently
     val safePageSize = Math.max(Math.min(request.pageSize, 100), 1)
-
-    // Split into two queries for better performance:
-    // 1. Count query: Fast for indexed columns, approximate for JSON columns
-    // 2. Data query: Processes only the requested page (e.g., 50 rows) instead of all rows
     val offset = (request.page - 1) * safePageSize
-
-    val hasJsonFilter = request.filters.exists { filter =>
-      filter.column match {
-        case "event_id" | "app_id" | "event_name" => false
-        case _ => true
-      }
-    }
 
     val countQuery = fr"SELECT COUNT(*) FROM events" ++ whereClause
     val dataQuery = fr"SELECT event_json FROM events" ++
       whereClause ++ orderByClause ++
       fr"LIMIT ${safePageSize} OFFSET ${offset}"
 
-    val totalItemsIO: IO[(Int, Boolean)] = if (hasJsonFilter) {
-      val minCountNeeded = offset + safePageSize
-      val sampleLimit = minCountNeeded + 1
-      val sampleQuery = fr"SELECT COUNT(*) FROM (" ++
-        fr"SELECT 1 FROM events" ++ whereClause ++ fr"LIMIT ${sampleLimit}" ++
-      fr")"
-
-      sampleQuery.query[Int].unique.transact(xa).map { sampleCount =>
-        if (sampleCount > minCountNeeded) {
-          (sampleCount, true)
-        } else {
-          (sampleCount, false)
-        }
-      }
-    } else {
-      countQuery.query[Int].unique.transact(xa).map(count => (count, false))
-    }
-
     for {
-      countResult <- totalItemsIO
+      totalItems <- countQuery.query[Int].unique.transact(xa)
       jsonStrings <- dataQuery.query[String].to[List].transact(xa)
       events <- jsonStrings.traverse { jsonStr =>
         IO.fromEither(parser.parse(jsonStr))
       }
     } yield {
-      val (totalItems, approximateCount) = countResult
       val totalPages = Math.max(1, (totalItems + safePageSize - 1) / safePageSize)
-      EventsResponse(events, totalPages, totalItems, approximateCount)
+      EventsResponse(events, totalPages, totalItems, approximateCount = false)
     }
   }
 
@@ -257,6 +217,9 @@ private[micro] class SqliteStorage(xa: Transactor[IO]) extends EventStorage {
 }
 
 private[micro] object SqliteStorage {
+  // Columns that have dedicated table columns (rather than JSON extraction)
+  private val INDEXED_COLUMNS = Set("event_id", "app_id", "event_name", "platform", "name_tracker", "domain_userid", "v_tracker")
+
   // Limit scan depth for columnStats queries to improve performance
   // Only scan most recent N events instead of entire table
   // Tunable: increase for more coverage, decrease for better performance
@@ -331,18 +294,30 @@ private[micro] object SqliteStorage {
         event_json JSON NOT NULL,
         failed BOOLEAN NOT NULL,
         app_id TEXT,
-        event_name TEXT
+        event_name TEXT,
+        platform TEXT,
+        name_tracker TEXT,
+        domain_userid TEXT,
+        v_tracker TEXT
       )
     """.update.run.void *>
       // Single-column indexes
       sql"CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp)".update.run.void *>
+      sql"CREATE INDEX IF NOT EXISTS idx_events_failed ON events(failed)".update.run.void *>
       sql"CREATE INDEX IF NOT EXISTS idx_events_app_id ON events(app_id)".update.run.void *>
       sql"CREATE INDEX IF NOT EXISTS idx_events_event_name ON events(event_name)".update.run.void *>
-      sql"CREATE INDEX IF NOT EXISTS idx_events_failed ON events(failed)".update.run.void *>
-      // Composite indexes for common filtered queries (dramatically improves performance with 10k+ rows)
+      sql"CREATE INDEX IF NOT EXISTS idx_events_platform ON events(platform)".update.run.void *>
+      sql"CREATE INDEX IF NOT EXISTS idx_events_name_tracker ON events(name_tracker)".update.run.void *>
+      sql"CREATE INDEX IF NOT EXISTS idx_events_domain_userid ON events(domain_userid)".update.run.void *>
+      sql"CREATE INDEX IF NOT EXISTS idx_events_v_tracker ON events(v_tracker)".update.run.void *>
+      // Composite indexes for filtered queries (dramatically improves performance with 10k+ rows)
       sql"CREATE INDEX IF NOT EXISTS idx_events_failed_timestamp ON events(failed, timestamp)".update.run.void *>
       sql"CREATE INDEX IF NOT EXISTS idx_events_app_id_timestamp ON events(app_id, timestamp)".update.run.void *>
-      sql"CREATE INDEX IF NOT EXISTS idx_events_event_name_timestamp ON events(event_name, timestamp)".update.run.void
+      sql"CREATE INDEX IF NOT EXISTS idx_events_event_name_timestamp ON events(event_name, timestamp)".update.run.void *>
+      sql"CREATE INDEX IF NOT EXISTS idx_events_platform_timestamp ON events(platform, timestamp)".update.run.void *>
+      sql"CREATE INDEX IF NOT EXISTS idx_events_name_tracker_timestamp ON events(name_tracker, timestamp)".update.run.void *>
+      sql"CREATE INDEX IF NOT EXISTS idx_events_domain_userid_timestamp ON events(domain_userid, timestamp)".update.run.void *>
+      sql"CREATE INDEX IF NOT EXISTS idx_events_v_tracker_timestamp ON events(v_tracker, timestamp)".update.run.void
   }
 
   private def createColumnsTable: ConnectionIO[Unit] = {
