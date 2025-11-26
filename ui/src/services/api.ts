@@ -14,7 +14,9 @@ export type TimelineData = {
 }
 
 export type ColumnStats = {
-  values: string[]
+  sortable: boolean
+  filterable: boolean
+  values?: string[]
 }
 
 export type ColumnStatsRequest = {
@@ -23,7 +25,6 @@ export type ColumnStatsRequest = {
 
 export type ColumnStatsResponse = {
   stats: Record<string, ColumnStats>
-  sortableColumns?: string[] // undefined = all columns sortable (memory mode)
 }
 
 export type EventsFilter = {

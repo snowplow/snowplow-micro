@@ -120,27 +120,33 @@ private[micro] class SqliteStorage(readXa: Transactor[IO], writeXa: Transactor[I
   override def getColumnStats(columns: List[String]): IO[ColumnStatsResponse] = {
     import SqliteStorage.COLUMN_STATS_SCAN_LIMIT
 
-    // Only fetch stats for indexed columns (SQLite mode doesn't support JSON column filtering)
-    val indexedColumns = columns
-      .filter(SqliteStorage.INDEXED_COLUMNS.contains)
-      .filterNot(EventStorage.isComplexColumn)
-      .filterNot(EventStorage.isTimestampColumn)
+    columns.parTraverse { column =>
+      val sortable = column == "collector_tstamp" || SqliteStorage.INDEXED_COLUMNS.contains(column)
+      val filterable = SqliteStorage.INDEXED_COLUMNS.contains(column)
 
-    indexedColumns.parTraverse { column =>
-      val query = fr"SELECT DISTINCT value FROM (" ++
-        fr"SELECT" ++ Fragment.const(column) ++ fr"as value FROM events" ++
-        fr"ORDER BY timestamp DESC LIMIT ${COLUMN_STATS_SCAN_LIMIT}" ++
-      fr") WHERE value IS NOT NULL LIMIT 20"
+      val distinctValues = if (filterable) {
+        val query = fr"SELECT DISTINCT value FROM (" ++
+          fr"SELECT" ++ Fragment.const(column) ++ fr"as value FROM events" ++
+          fr"ORDER BY timestamp DESC LIMIT ${COLUMN_STATS_SCAN_LIMIT}" ++
+        fr") WHERE value IS NOT NULL LIMIT 20"
 
-      query.query[String]
-        .to[List]
-        .transact(readXa)
-        .map(values => column -> ColumnStats(values))
+        query.query[String]
+          .to[List]
+          .transact(readXa)
+          .map(values => Some(values))
+      } else {
+        IO.pure(None)
+      }
+
+      distinctValues.map { values =>
+        column -> ColumnStats(
+          sortable = sortable,
+          filterable = filterable,
+          values = values
+        )
+      }
     }.map { stats =>
-      ColumnStatsResponse(
-        stats.filter(_._2.values.nonEmpty).toMap,
-        Some(SqliteStorage.INDEXED_COLUMNS.toList :+ "collector_tstamp")
-      )
+      ColumnStatsResponse(stats.toMap)
     }
   }
 
@@ -165,7 +171,6 @@ private[micro] class SqliteStorage(readXa: Transactor[IO], writeXa: Transactor[I
     // Only filter on indexed columns (SQLite mode doesn't support JSON column filtering)
     val columnFilters = request.filters
       .filter(f => SqliteStorage.INDEXED_COLUMNS.contains(f.column))
-      .filterNot(f => EventStorage.isComplexColumn(f.column))
       .filter(_.value.nonEmpty) // Skip empty filter values
       .map { filter =>
         fr"AND" ++ Fragment.const(filter.column) ++ fr"=" ++ fr"${filter.value}"
@@ -175,9 +180,9 @@ private[micro] class SqliteStorage(readXa: Transactor[IO], writeXa: Transactor[I
     val whereClause = allConditions.foldLeft(baseConditions)(_ ++ _)
 
     // Only allow sorting on indexed columns (SQLite mode doesn't support JSON column sorting)
-    val orderByClause = request.sorting.filterNot(s =>
-      EventStorage.isComplexColumn(s.column)
-    ).filter(s => s.column == "collector_tstamp" || SqliteStorage.INDEXED_COLUMNS.contains(s.column)
+    val orderByClause = request.sorting.filter(s =>
+      s.column == "collector_tstamp" ||
+        SqliteStorage.INDEXED_COLUMNS.contains(s.column)
     ).fold(fr"ORDER BY timestamp DESC") { sorting =>
         val columnExpr = if (sorting.column == "collector_tstamp") {
           Fragment.const("timestamp")

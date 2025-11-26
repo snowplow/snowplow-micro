@@ -113,29 +113,29 @@ private[micro] class InMemoryStorage extends EventStorage {
 
   override def getColumnStats(columns: List[String]): IO[ColumnStatsResponse] = {
     getEvents.map { jsonEvents =>
-      // TODO: support complex columns at some point
-      val simpleColumns = columns.filterNot(col =>
-        EventStorage.isComplexColumn(col) ||
-          EventStorage.isTimestampColumn(col)
-      )
+      val stats = columns.map { column =>
+        // TODO: support complex columns at some point
+        val sortable = !EventStorage.isComplexColumn(column)
 
-      val stats = simpleColumns.flatMap { column =>
-        val distinctValues = jsonEvents.flatMap { json =>
-          json.asObject.flatMap(_.apply(column)).flatMap {
-            case value if value.isNull => None
-            case value => Some(value.asString.getOrElse(value.noSpaces))
-          }
-        }.distinct.take(20)
+        // TODO: support complex columns at some point
+        val filterable = !EventStorage.isComplexColumn(column) &&
+          !EventStorage.isTimestampColumn(column)
 
-        if (distinctValues.nonEmpty) {
-          Some(column -> ColumnStats(distinctValues))
+        val distinctValues = if (filterable) {
+          val values = jsonEvents.flatMap(InMemoryStorage.getColumnValue(_, column)).distinct.take(20)
+          Some(values)
         } else {
           None
         }
+
+        column -> ColumnStats(
+          sortable = sortable,
+          filterable = filterable,
+          values = distinctValues
+        )
       }.toMap
 
-      // In memory mode, all columns are sortable (sortableColumns = None)
-      ColumnStatsResponse(stats, None)
+      ColumnStatsResponse(stats)
     }
   }
 

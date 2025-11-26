@@ -300,6 +300,60 @@ class InMemoryStorageSpec extends Specification with EventStorageTimelineSpec wi
   timelineTests(Resource.eval(IO(emptyCache())), "InMemoryStorage")
   columnStatsTests(Resource.eval(IO(emptyCache())), "InMemoryStorage")
   filteredEventsTests(Resource.eval(IO(emptyCache())), "InMemoryStorage")
+
+  "InMemoryStorage specific column stats behavior" >> {
+    "should mark complex columns as non-sortable, non-filterable" >> {
+      Resource.eval(IO(emptyCache())).use { storage =>
+        storage.getColumnStats(List("contexts_com_example_schema_1.field1")).map { response =>
+          response.stats must haveKey("contexts_com_example_schema_1.field1")
+          response.stats("contexts_com_example_schema_1.field1").sortable must beFalse
+          response.stats("contexts_com_example_schema_1.field1").filterable must beFalse
+          response.stats("contexts_com_example_schema_1.field1").values must beNone
+        }
+      }.unsafeRunSync()
+    }
+
+    "should mark timestamp columns as sortable but non-filterable" >> {
+      Resource.eval(IO(emptyCache())).use { storage =>
+        storage.getColumnStats(List("collector_tstamp", "derived_tstamp")).map { response =>
+          response.stats must haveKey("collector_tstamp")
+          response.stats must haveKey("derived_tstamp")
+          response.stats("collector_tstamp").sortable must beTrue
+          response.stats("derived_tstamp").sortable must beTrue
+          response.stats("collector_tstamp").filterable must beFalse
+          response.stats("derived_tstamp").filterable must beFalse
+          response.stats("collector_tstamp").values must beNone
+          response.stats("derived_tstamp").values must beNone
+        }
+      }.unsafeRunSync()
+    }
+
+    "should mark simple columns as both sortable and filterable" >> {
+      Resource.eval(IO(emptyCache())).use { storage =>
+        storage.getColumnStats(List("event_id", "app_id")).map { response =>
+          response.stats must haveKey("event_id")
+          response.stats must haveKey("app_id")
+          response.stats("event_id").sortable must beTrue
+          response.stats("app_id").sortable must beTrue
+          response.stats("event_id").filterable must beTrue
+          response.stats("app_id").filterable must beTrue
+          response.stats("event_id").values mustEqual Some(Nil)
+          response.stats("app_id").values mustEqual Some(Nil)
+        }
+      }.unsafeRunSync()
+    }
+
+    "should mark non-existent columns as sortable and filterable in memory mode" >> {
+      Resource.eval(IO(emptyCache())).use { storage =>
+        storage.getColumnStats(List("non_existent_column")).map { response =>
+          response.stats must haveKey("non_existent_column")
+          response.stats("non_existent_column").sortable must beTrue
+          response.stats("non_existent_column").filterable must beTrue
+          response.stats("non_existent_column").values mustEqual Some(Nil)
+        }
+      }.unsafeRunSync()
+    }
+  }
 }
 
 object InMemoryStorageSpec {

@@ -56,9 +56,6 @@ function App() {
   const [columnStats, setColumnStats] = useState<Record<string, ColumnStats>>(
     {}
   )
-  const [sortableColumns, setSortableColumns] = useState<string[] | undefined>(
-    undefined
-  )
   const [sorting, setSorting] = useState<SortingState>([])
 
   // Handle scrolling to newly added columns
@@ -82,7 +79,6 @@ function App() {
       const token = await getAccessToken()
       const response = await EventsApiService.fetchColumnStats(columnNames, token)
       setColumnStats(response.stats)
-      setSortableColumns(response.sortableColumns)
     } catch (err) {
       console.warn('Failed to fetch column stats:', err)
     }
@@ -211,7 +207,6 @@ function App() {
       setTimelineData(fetchedTimeline)
       setAvailableColumnNames(fetchedColumns)
       setColumnStats(fetchedColumnStats.stats)
-      setSortableColumns(fetchedColumnStats.sortableColumns)
       setLastRefreshTime(new Date())
     } catch (err) {
       console.error('Failed to refresh data:', err)
@@ -488,7 +483,6 @@ function App() {
               onRowClick={handleRowClick}
               selectedRowId={selectedRowId}
               columnStats={columnStats}
-              sortableColumns={sortableColumns}
               currentPage={currentPage}
               totalPages={eventData.totalPages}
               totalItems={eventData.totalItems}

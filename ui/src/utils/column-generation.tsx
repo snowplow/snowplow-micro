@@ -1,7 +1,7 @@
 import type { ColumnDef } from '@tanstack/react-table'
 import { Button } from '@/components/ui/button'
 import { ArrowUp, ArrowDown, Eye, Check, X } from 'lucide-react'
-import type { Event } from '@/services/api'
+import type { Event, ColumnStats } from '@/services/api'
 import { DraggableColumn } from '@/components/DraggableColumn'
 import { TruncatedCell } from '@/components/TruncatedCell'
 import { TruncatedColumnName } from '@/components/TruncatedColumnName'
@@ -27,8 +27,7 @@ export function generateColumns(
   selectedCellId: string | null,
   onJsonCellToggle: (cellId: string, value: any, title: string) => void,
   onReorderColumns: (fromIndex: number, toIndex: number) => void,
-  columnStats?: Record<string, { values: string[] }>,
-  sortableColumns?: string[] // undefined = all columns sortable (memory mode)
+  columnStats: Record<string, ColumnStats>
 ): EventColumnDef[] {
   const columns: EventColumnDef[] = []
 
@@ -100,13 +99,11 @@ export function generateColumns(
   selectedColumns.forEach((columnMetadata, index) => {
     const { name: fieldName } = columnMetadata
 
-    // Check if this column supports sorting/filtering
-    // If sortableColumns is undefined, all columns are sortable (memory mode)
-    // If sortableColumns is defined, only those columns are sortable (SQLite mode)
-    const isSortable =
-      sortableColumns === undefined || sortableColumns.includes(fieldName)
-    const isFilterable = columnStats?.[fieldName] !== undefined
-    const distinctValues = columnStats?.[fieldName]?.values ?? []
+    // Use backend-provided sortable/filterable flags
+    const stats = columnStats[fieldName]
+    const isSortable = stats?.sortable ?? false
+    const isFilterable = stats?.filterable ?? false
+    const distinctValues = stats?.values ?? []
     const useAutocomplete = distinctValues.length > 0
 
     const columnDef: EventColumnDef = {

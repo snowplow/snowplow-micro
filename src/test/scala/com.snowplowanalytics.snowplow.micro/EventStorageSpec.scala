@@ -280,10 +280,12 @@ trait EventStorageColumnStatsSpec {
 
   def columnStatsTests(storageResource: Resource[IO, EventStorage], storageName: String): Fragment = {
     s"$storageName getColumnStats" >> {
-      "should return empty map for empty storage" >> {
+      "should return metadata for all columns even when storage is empty" >> {
         storageResource.use { storage =>
           storage.getColumnStats(List("event_id", "app_id")).map { response =>
-            response.stats must beEmpty
+            response.stats must haveKeys("event_id", "app_id")
+            response.stats("event_id").values mustEqual Some(Nil)
+            response.stats("app_id").values mustEqual Some(Nil)
           }
         }.unsafeRunSync()
       }
@@ -297,41 +299,17 @@ trait EventStorageColumnStatsSpec {
             response.stats must haveKey("event_id")
             response.stats must haveKey("app_id")
 
-            response.stats("event_id").values must contain(exactly(
+            response.stats("event_id").values must beSome(contain(exactly(
               GoodEvent1.event.event_id.toString,
               GoodEvent2.event.event_id.toString,
               GoodEvent3.event.event_id.toString
-            ))
+            )))
 
-            response.stats("app_id").values must contain(exactly("test1", "test2", "test3"))
+            response.stats("app_id").values must beSome(contain(exactly("test1", "test2", "test3")))
           }
         }.unsafeRunSync()
       }
 
-      "should ignore complex columns" >> {
-        storageResource.use { storage =>
-          for {
-            _ <- storage.addToGood(List(GoodEvent1))
-            response <- storage.getColumnStats(List("event_id", "contexts_com_example_schema_1.field1"))
-          } yield {
-            response.stats must haveKey("event_id")
-            response.stats must not(haveKey("contexts_com_example_schema_1.field1"))
-          }
-        }.unsafeRunSync()
-      }
-
-      "should ignore timestamp columns" >> {
-        storageResource.use { storage =>
-          for {
-            _ <- storage.addToGood(List(GoodEvent1))
-            response <- storage.getColumnStats(List("event_id", "collector_tstamp", "derived_tstamp"))
-          } yield {
-            response.stats must haveKey("event_id")
-            response.stats must not(haveKey("collector_tstamp"))
-            response.stats must not(haveKey("derived_tstamp"))
-          }
-        }.unsafeRunSync()
-      }
 
       "should limit to 20 distinct values" >> {
         val manyEvents = (1 to 25).map { i =>
@@ -346,7 +324,9 @@ trait EventStorageColumnStatsSpec {
             response <- storage.getColumnStats(List("event_id"))
           } yield {
             response.stats must haveKey("event_id")
-            response.stats("event_id").values must have size(20)
+            response.stats("event_id").values must beSome.like {
+              case values => values must have size(20)
+            }
           }
         }.unsafeRunSync()
       }
@@ -358,21 +338,11 @@ trait EventStorageColumnStatsSpec {
             response <- storage.getColumnStats(List("app_id"))
           } yield {
             response.stats must haveKey("app_id")
-            response.stats("app_id").values must contain(exactly("test1", "test2", "test3"))
+            response.stats("app_id").values must beSome(contain(exactly("test1", "test2", "test3")))
           }
         }.unsafeRunSync()
       }
 
-      "should return empty stats for non-existent columns" >> {
-        storageResource.use { storage =>
-          for {
-            _ <- storage.addToGood(List(GoodEvent1))
-            response <- storage.getColumnStats(List("non_existent_column"))
-          } yield {
-            response.stats must beEmpty
-          }
-        }.unsafeRunSync()
-      }
     }
   }
 }
