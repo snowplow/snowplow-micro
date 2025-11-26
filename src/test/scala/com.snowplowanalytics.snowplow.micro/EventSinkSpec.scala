@@ -37,12 +37,12 @@ class EventSinkSpec extends CatsResource[IO, EventSink] with SpecificationLike {
 
   sequential
 
-  "processThriftBytes" >> {
+  "storeRawEvents" >> {
     "should add a BadEvent to the cache if the array of bytes is not a valid Thrift payload" >> withResource { sink =>
       val storage = sink.storage.asInstanceOf[InMemoryStorage]
       storage.reset().unsafeRunSync()
       val bytes = Array(1, 3, 5, 7).map(_.toByte)
-      sink.processThriftBytes(bytes).map { _ =>
+      sink.storeRawEvents(List(bytes)).map { _ =>
         storage.filterBad() must beLike { case List(badEvent) if badEvent.errors.exists(_.contains("Can't deserialize Thrift bytes")) => ok }
         storage.filterGood().size must beEqualTo(0)
       }
@@ -52,7 +52,7 @@ class EventSinkSpec extends CatsResource[IO, EventSink] with SpecificationLike {
       val storage = sink.storage.asInstanceOf[InMemoryStorage]
       storage.reset().unsafeRunSync()
       val bytes = buildThriftBytesBadCollectorPayload()
-      sink.processThriftBytes(bytes).map { _ =>
+      sink.storeRawEvents(List(bytes)).map { _ =>
         storage.filterBad() must beLike { case List(badEvent) if badEvent.errors.exists(_.contains("Error while extracting event(s) from collector payload")) => ok }
         storage.filterGood().size must beEqualTo(0)
       }
@@ -62,7 +62,7 @@ class EventSinkSpec extends CatsResource[IO, EventSink] with SpecificationLike {
       val storage = sink.storage.asInstanceOf[InMemoryStorage]
       storage.reset().unsafeRunSync()
       val bytes = buildThriftBytes1Good1Bad()
-      sink.processThriftBytes(bytes).map { _ =>
+      sink.storeRawEvents(List(bytes)).map { _ =>
         storage.filterBad() must beLike { case List(badEvent) if badEvent.errors.exists(_.contains("Error while validating the event")) => ok }
         storage.filterGood().size must beEqualTo(1)
       }

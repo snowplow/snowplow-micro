@@ -61,7 +61,16 @@ final class EventSink(igluClient: IgluCirceClient[IO],
   override def targetBytes: IO[Int] = IO.pure(maxBytes)
 
   override def storeRawEvents(events: List[Array[Byte]]): IO[Unit] = {
-    events.traverse(bytes => processThriftBytes(bytes)).void
+    events.traverse(collectEventsFromThriftBytes).map { results =>
+      val (allGood, allBad) = results.foldLeft((List.empty[GoodEvent], List.empty[BadEvent])) {
+        case ((good, bad), (g, b)) => (good ++ g, bad ++ b)
+      }
+      (allGood, allBad)
+    }.flatMap { case (goodEvents, badEvents) =>
+      storage.addToGood(goodEvents) >>
+      storage.addToBad(badEvents) >>
+      sendOutput(goodEvents)
+    }
   }
 
   private def formatEvent(event: GoodEvent): String =
@@ -81,15 +90,15 @@ final class EventSink(igluClient: IgluCirceClient[IO],
   }
 
   /** Deserialize Thrift bytes into `CollectorPayload`s,
-   * validate them and store the result in [[ValidationCache]].
+   * validate them and return the results for batch processing.
    * A `CollectorPayload` can contain several events.
    */
-  private[micro] def processThriftBytes(thriftBytes: Array[Byte]): IO[Unit] =
+  private[micro] def collectEventsFromThriftBytes(thriftBytes: Array[Byte]): IO[(List[GoodEvent], List[BadEvent])] =
     ThriftLoader.toCollectorPayload(thriftBytes, processor, Instant.now()) match {
       case Validated.Valid(collectorPayload) =>
         adapterRegistry.toRawEvents(collectorPayload, igluClient, processor, registryLookup, enrichConfig.maxJsonDepth, Instant.now()).flatMap {
           case Validated.Valid(rawEvents) =>
-            val partitionEvents = rawEvents.toList.foldLeftM((Nil, Nil): (List[GoodEvent], List[BadEvent])) {
+            rawEvents.toList.foldLeftM((Nil, Nil): (List[GoodEvent], List[BadEvent])) {
               case ((good, bad), rawEvent) =>
                 validateEvent(rawEvent).value.map {
                   case OptionIor.Right(goodEvent) =>
@@ -107,21 +116,15 @@ final class EventSink(igluClient: IgluCirceClient[IO],
                     (good, bad)
                 }
             }
-            partitionEvents.flatMap {
-              case (goodEvents, badEvents) =>
-                storage.addToGood(goodEvents) >>
-                storage.addToBad(badEvents) >>
-                sendOutput(goodEvents)
-            }
           case Validated.Invalid(badRow) =>
             val bad = BadEvent(Some(collectorPayload), None, List("Error while extracting event(s) from collector payload and validating it/them.", badRow.compact))
             logger.warn(s"BAD ${bad.errors.head}")
-            storage.addToBad(List(bad))
+            IO.pure((Nil, List(bad)))
         }
       case Validated.Invalid(badRows) =>
         val bad = BadEvent(None, None, List("Can't deserialize Thrift bytes.") ++ badRows.toList.map(_.compact))
         logger.warn(s"BAD ${bad.errors.head}")
-        storage.addToBad(List(bad))
+        IO.pure((Nil, List(bad)))
     }
 
   /** Validate the raw event using Common Enrich logic, and extract the event type if any,

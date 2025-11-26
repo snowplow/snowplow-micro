@@ -254,7 +254,7 @@ private[micro] object SqliteStorage {
     val params = List(
       "journal_mode=WAL",   // Write-Ahead Logging for better concurrency
       "busy_timeout=30000", // Wait up to 30 seconds instead of immediate BUSY error
-      "synchronous=NORMAL", // Balance between safety and performance
+      "synchronous=FULL",   // Maximum durability - fsync after every commit
       "cache_size=-20000",  // 20MB cache (negative = KB)
       "temp_store=MEMORY"   // Use memory for temporary tables
     )
