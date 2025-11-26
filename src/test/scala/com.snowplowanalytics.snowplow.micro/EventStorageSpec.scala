@@ -517,19 +517,19 @@ trait EventStorageFilteredEventsSpec {
         }.unsafeRunSync()
       }
 
-      "should handle case-insensitive filtering" >> {
+      "should handle filtering" >> {
         storageResource.use { storage =>
           for {
-            _ <- storage.addToGood(List(GoodEvent1.copy(event = GoodEvent1.event.copy(app_id = Some("TestApp")))))
-            upperFilter = EventsFilter("app_id", "testapp")
-            lowerFilter = EventsFilter("app_id", "TESTAPP")
-            upperRequest = EventsRequest(List(upperFilter), None, None, None, 1, 10)
-            lowerRequest = EventsRequest(List(lowerFilter), None, None, None, 1, 10)
-            upperResult <- storage.getFilteredEvents(upperRequest)
-            lowerResult <- storage.getFilteredEvents(lowerRequest)
+            _ <- storage.addToGood(List(GoodEvent1.copy(event = GoodEvent1.event.copy(app_id = Some("testapp")))))
+            matchFilter = EventsFilter("app_id", "testapp")
+            noMatchFilter = EventsFilter("app_id", "other")
+            matchRequest = EventsRequest(List(matchFilter), None, None, None, 1, 10)
+            noMatchRequest = EventsRequest(List(noMatchFilter), None, None, None, 1, 10)
+            matchResult <- storage.getFilteredEvents(matchRequest)
+            noMatchResult <- storage.getFilteredEvents(noMatchRequest)
           } yield {
-            upperResult.events must have size(1)
-            lowerResult.events must have size(1)
+            matchResult.events must have size(1)
+            noMatchResult.events must have size(0)
           }
         }.unsafeRunSync()
       }

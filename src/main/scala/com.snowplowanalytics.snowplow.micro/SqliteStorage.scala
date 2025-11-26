@@ -167,7 +167,7 @@ private[micro] class SqliteStorage(readXa: Transactor[IO], writeXa: Transactor[I
       .filterNot(f => EventStorage.isComplexColumn(f.column))
       .filter(_.value.nonEmpty) // Skip empty filter values
       .map { filter =>
-        fr"AND" ++ Fragment.const(filter.column) ++ fr"=" ++ fr"${filter.value}" ++ fr"COLLATE NOCASE"
+        fr"AND" ++ Fragment.const(filter.column) ++ fr"=" ++ fr"${filter.value}"
       }
 
     val allConditions = whereConditions ++ columnFilters
@@ -197,15 +197,16 @@ private[micro] class SqliteStorage(readXa: Transactor[IO], writeXa: Transactor[I
       whereClause ++ orderByClause ++
       fr"LIMIT ${safePageSize} OFFSET ${offset}"
 
-    for {
-      totalItems <- countQuery.query[Int].unique.transact(readXa)
-      jsonStrings <- dataQuery.query[String].to[List].transact(readXa)
-      events <- jsonStrings.traverse { jsonStr =>
+    (
+      countQuery.query[Int].unique.transact(readXa),
+      dataQuery.query[String].to[List].transact(readXa)
+    ).parTupled.flatMap { case (totalItems, jsonStrings) =>
+      jsonStrings.traverse { jsonStr =>
         IO.fromEither(parser.parse(jsonStr))
+      }.map { events =>
+        val totalPages = Math.max(1, (totalItems + safePageSize - 1) / safePageSize)
+        EventsResponse(events, totalPages, totalItems)
       }
-    } yield {
-      val totalPages = Math.max(1, (totalItems + safePageSize - 1) / safePageSize)
-      EventsResponse(events, totalPages, totalItems)
     }
   }
 
