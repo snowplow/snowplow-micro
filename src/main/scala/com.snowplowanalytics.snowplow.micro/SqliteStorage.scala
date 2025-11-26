@@ -326,16 +326,10 @@ private[micro] object SqliteStorage {
         v_tracker TEXT
       )
     """.update.run.void *>
-      // Single-column indexes
+      // Timestamp-only index for queries without column filters
       sql"CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp)".update.run.void *>
-      sql"CREATE INDEX IF NOT EXISTS idx_events_failed ON events(failed)".update.run.void *>
-      sql"CREATE INDEX IF NOT EXISTS idx_events_app_id ON events(app_id)".update.run.void *>
-      sql"CREATE INDEX IF NOT EXISTS idx_events_event_name ON events(event_name)".update.run.void *>
-      sql"CREATE INDEX IF NOT EXISTS idx_events_platform ON events(platform)".update.run.void *>
-      sql"CREATE INDEX IF NOT EXISTS idx_events_name_tracker ON events(name_tracker)".update.run.void *>
-      sql"CREATE INDEX IF NOT EXISTS idx_events_domain_userid ON events(domain_userid)".update.run.void *>
-      sql"CREATE INDEX IF NOT EXISTS idx_events_v_tracker ON events(v_tracker)".update.run.void *>
-      // Composite indexes for filtered queries (dramatically improves performance with 10k+ rows)
+      // Composite indexes for filtered queries (column, timestamp)
+      // These also serve single-column lookups via leftmost prefix
       sql"CREATE INDEX IF NOT EXISTS idx_events_failed_timestamp ON events(failed, timestamp)".update.run.void *>
       sql"CREATE INDEX IF NOT EXISTS idx_events_app_id_timestamp ON events(app_id, timestamp)".update.run.void *>
       sql"CREATE INDEX IF NOT EXISTS idx_events_event_name_timestamp ON events(event_name, timestamp)".update.run.void *>
