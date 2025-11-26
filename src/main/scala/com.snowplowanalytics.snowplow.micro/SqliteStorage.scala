@@ -15,12 +15,13 @@ import cats.implicits._
 import doobie._
 import doobie.implicits._
 import doobie.hikari.HikariTransactor
+import fs2.Stream
 import io.circe.parser
 import org.typelevel.log4cats.Logger
 import org.typelevel.log4cats.slf4j.Slf4jLogger
 
 import java.sql.Timestamp
-import java.time.Instant
+import java.time.{Duration, Instant}
 import java.util.concurrent.Executors
 import scala.concurrent.ExecutionContext
 import scala.concurrent.duration._
@@ -210,7 +211,7 @@ private[micro] class SqliteStorage(readXa: Transactor[IO], writeXa: Transactor[I
     }
   }
 
-  def cleanupExpiredEvents(ttl: java.time.Duration): IO[Unit] = {
+  def cleanupExpiredEvents(ttl: Duration): IO[Unit] = {
     implicit val logger: Logger[IO] = Slf4jLogger.getLogger[IO]
     val cutoffTime = Instant.now().minus(ttl)
     logger.info(s"Running TTL cleanup: deleting events older than $cutoffTime (TTL: $ttl)") *>
@@ -222,9 +223,16 @@ private[micro] class SqliteStorage(readXa: Transactor[IO], writeXa: Transactor[I
         logger.info(s"TTL cleanup completed: deleted $deletedCount events")
       }
   }
+
+  def scheduleCleanup(ttl: Duration, interval: Duration): Resource[IO, Unit] = {
+    Resource.eval(cleanupExpiredEvents(ttl)) *>
+    scheduleBackgroundTask(cleanupExpiredEvents(ttl), interval)
+  }
 }
 
 private[micro] object SqliteStorage {
+  implicit val logger: Logger[IO] = Slf4jLogger.getLogger[IO]
+
   // Columns that have dedicated table columns (rather than JSON extraction)
   private val INDEXED_COLUMNS = Set("event_id", "app_id", "event_name", "platform", "name_tracker", "domain_userid", "v_tracker")
 
@@ -259,10 +267,6 @@ private[micro] object SqliteStorage {
       "temp_store=MEMORY"   // Use memory for temporary tables
     )
     val url = s"jdbc:sqlite:$dbPath?${params.mkString("&")}"
-    create(url)
-  }
-
-  private def create(url: String): Resource[IO, SqliteStorage] = {
     for {
       // Write transactor: single connection (SQLite only allows 1 writer anyway)
       writeEc <- databaseExecutionContext(1)
@@ -346,6 +350,16 @@ private[micro] object SqliteStorage {
       )
     """.update.run.void *>
       sql"CREATE INDEX IF NOT EXISTS idx_columns_name ON columns(name)".update.run.void
+  }
+
+  private def scheduleBackgroundTask(task: IO[Unit], interval: Duration): Resource[IO, Unit] = {
+    Stream
+      .awakeEvery[IO](interval.toMillis.milliseconds)
+      .evalMap(_ => task)
+      .compile
+      .drain
+      .background
+      .void
   }
 
   implicit val instantEpochMeta: Meta[Instant] =

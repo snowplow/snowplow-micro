@@ -43,8 +43,11 @@ object EventStorage {
     config match {
       case StorageConfig.None =>
         Resource.pure(NoStorage)
-      case StorageConfig.Persistent(path, _, _) =>
-        SqliteStorage.file(path.toString)
+      case StorageConfig.Persistent(path, ttl, cleanupInterval) =>
+        for {
+          storage <- SqliteStorage.file(path.toString)
+          _ <- storage.scheduleCleanup(ttl, cleanupInterval)
+        } yield storage
       case StorageConfig.InMemory =>
         Resource.pure(new InMemoryStorage())
     }

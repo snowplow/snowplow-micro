@@ -154,7 +154,8 @@ object SqliteStorageSpec {
       new java.io.File(path).delete()
       new java.io.File(s"$path-shm").delete()
       new java.io.File(s"$path-wal").delete()
-    }).flatMap(SqliteStorage.file(_))
+      ()
+    }).flatMap(SqliteStorage.file)
   }
 
   def freshDbResource: Resource[IO, EventStorage] = {
@@ -165,7 +166,8 @@ object SqliteStorageSpec {
         new java.io.File(path).delete()
         new java.io.File(s"$path-shm").delete()
         new java.io.File(s"$path-wal").delete()
-      }).flatMap(SqliteStorage.file(_))
+        ()
+      }).flatMap(SqliteStorage.file)
     } yield storage
   }
 
