@@ -319,7 +319,7 @@ function App() {
 
     const timeoutId = setTimeout(() => {
       fetchEventsWithFilters()
-    }, 100)
+    }, 400)
 
     return () => clearTimeout(timeoutId)
   }, [columnFilters, selectedMinute, currentPage, sorting, isAuthenticated])
