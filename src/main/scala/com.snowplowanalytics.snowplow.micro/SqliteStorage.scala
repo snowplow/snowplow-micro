@@ -190,7 +190,7 @@ private[micro] class SqliteStorage(readXa: Transactor[IO], writeXa: Transactor[I
           Fragment.const(sorting.column)
         }
         val direction = if (sorting.desc) "DESC" else "ASC"
-        fr"ORDER BY" ++ columnExpr ++ Fragment.const(s" $direction")
+        fr"ORDER BY" ++ columnExpr ++ Fragment.const(direction)
       }
 
     // prevent OOM when an unreasonably large page size is supplied
