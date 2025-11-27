@@ -12,6 +12,7 @@ package com.snowplowanalytics.snowplow.micro
 
 import cats.effect.{IO, Resource}
 import cats.implicits._
+import com.snowplowanalytics.snowplow.micro.model.ColumnStatsResponse
 import doobie._
 import doobie.implicits._
 import doobie.hikari.HikariTransactor
@@ -145,9 +146,7 @@ private[micro] class SqliteStorage(readXa: Transactor[IO], writeXa: Transactor[I
           values = values
         )
       }
-    }.map { stats =>
-      ColumnStatsResponse(stats.toMap)
-    }
+    }.map(_.toMap)
   }
 
   override def getFilteredEvents(request: EventsRequest): IO[EventsResponse] = {

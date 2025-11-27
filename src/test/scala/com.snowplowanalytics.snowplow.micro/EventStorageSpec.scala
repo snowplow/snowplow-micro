@@ -283,9 +283,9 @@ trait EventStorageColumnStatsSpec {
       "should return metadata for all columns even when storage is empty" >> {
         storageResource.use { storage =>
           storage.getColumnStats(List("event_id", "app_id")).map { response =>
-            response.stats must haveKeys("event_id", "app_id")
-            response.stats("event_id").values mustEqual Some(Nil)
-            response.stats("app_id").values mustEqual Some(Nil)
+            response must haveKeys("event_id", "app_id")
+            response("event_id").values mustEqual Some(Nil)
+            response("app_id").values mustEqual Some(Nil)
           }
         }.unsafeRunSync()
       }
@@ -296,16 +296,16 @@ trait EventStorageColumnStatsSpec {
             _ <- storage.addToGood(List(GoodEvent1, GoodEvent2, GoodEvent3))
             response <- storage.getColumnStats(List("event_id", "app_id"))
           } yield {
-            response.stats must haveKey("event_id")
-            response.stats must haveKey("app_id")
+            response must haveKey("event_id")
+            response must haveKey("app_id")
 
-            response.stats("event_id").values must beSome(contain(exactly(
+            response("event_id").values must beSome(contain(exactly(
               GoodEvent1.event.event_id.toString,
               GoodEvent2.event.event_id.toString,
               GoodEvent3.event.event_id.toString
             )))
 
-            response.stats("app_id").values must beSome(contain(exactly("test1", "test2", "test3")))
+            response("app_id").values must beSome(contain(exactly("test1", "test2", "test3")))
           }
         }.unsafeRunSync()
       }
@@ -323,8 +323,8 @@ trait EventStorageColumnStatsSpec {
             _ <- storage.addToGood(manyEvents)
             response <- storage.getColumnStats(List("event_id"))
           } yield {
-            response.stats must haveKey("event_id")
-            response.stats("event_id").values must beSome.like {
+            response must haveKey("event_id")
+            response("event_id").values must beSome.like {
               case values => values must have size(20)
             }
           }
@@ -337,8 +337,8 @@ trait EventStorageColumnStatsSpec {
             _ <- storage.addToGood(List(GoodEvent1, GoodEvent2, GoodEvent3))
             response <- storage.getColumnStats(List("app_id"))
           } yield {
-            response.stats must haveKey("app_id")
-            response.stats("app_id").values must beSome(contain(exactly("test1", "test2", "test3")))
+            response must haveKey("app_id")
+            response("app_id").values must beSome(contain(exactly("test1", "test2", "test3")))
           }
         }.unsafeRunSync()
       }

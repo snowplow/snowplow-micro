@@ -12,6 +12,7 @@ package com.snowplowanalytics.snowplow.micro
 
 import cats.effect.{IO, Resource}
 import com.snowplowanalytics.snowplow.micro.Configuration.StorageConfig
+import com.snowplowanalytics.snowplow.micro.model.ColumnStatsResponse
 import io.circe.Json
 
 import java.time.Instant
@@ -34,7 +35,7 @@ object NoStorage extends EventStorage {
   def reset(): IO[Unit] = IO.unit
   def getColumns: IO[List[String]] = IO.pure(List.empty)
   def getTimeline: IO[TimelineData] = IO.pure(TimelineData(List.empty))
-  def getColumnStats(columns: List[String]): IO[ColumnStatsResponse] = IO.pure(ColumnStatsResponse(Map.empty))
+  def getColumnStats(columns: List[String]): IO[ColumnStatsResponse] = IO.pure(Map.empty)
   def getFilteredEvents(request: EventsRequest): IO[EventsResponse] = IO.pure(EventsResponse(List.empty, 0, 0))
 }
 

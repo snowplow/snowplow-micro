@@ -78,7 +78,7 @@ function App() {
     try {
       const token = await getAccessToken()
       const response = await EventsApiService.fetchColumnStats(columnNames, token)
-      setColumnStats(response.stats)
+      setColumnStats(response)
     } catch (err) {
       console.warn('Failed to fetch column stats:', err)
     }
@@ -206,7 +206,7 @@ function App() {
       setEventData(fetchedEventData)
       setTimelineData(fetchedTimeline)
       setAvailableColumnNames(fetchedColumns)
-      setColumnStats(fetchedColumnStats.stats)
+      setColumnStats(fetchedColumnStats)
       setLastRefreshTime(new Date())
     } catch (err) {
       console.error('Failed to refresh data:', err)

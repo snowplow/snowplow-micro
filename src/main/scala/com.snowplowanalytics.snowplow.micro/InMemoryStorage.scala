@@ -11,6 +11,7 @@
 package com.snowplowanalytics.snowplow.micro
 
 import cats.effect.IO
+import com.snowplowanalytics.snowplow.micro.model.ColumnStatsResponse
 import io.circe.Json
 
 import java.time.temporal.ChronoUnit
@@ -135,7 +136,7 @@ private[micro] class InMemoryStorage extends EventStorage {
         )
       }.toMap
 
-      ColumnStatsResponse(stats)
+      stats
     }
   }
 

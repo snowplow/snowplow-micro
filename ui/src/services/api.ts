@@ -23,9 +23,7 @@ export type ColumnStatsRequest = {
   columns: string[]
 }
 
-export type ColumnStatsResponse = {
-  stats: Record<string, ColumnStats>
-}
+export type ColumnStatsResponse = Record<string, ColumnStats>
 
 export type EventsFilter = {
   column: string

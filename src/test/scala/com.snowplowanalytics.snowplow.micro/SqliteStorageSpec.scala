@@ -143,10 +143,10 @@ class SqliteStorageSpec extends Specification with EventStorageTimelineSpec with
     "should mark non-indexed complex columns as non-sortable, non-filterable" >> {
       SqliteStorageSpec.freshDbResource.use { storage =>
         storage.getColumnStats(List("contexts_com_example_schema_1.field1")).map { response =>
-          response.stats must haveKey("contexts_com_example_schema_1.field1")
-          response.stats("contexts_com_example_schema_1.field1").sortable must beFalse
-          response.stats("contexts_com_example_schema_1.field1").filterable must beFalse
-          response.stats("contexts_com_example_schema_1.field1").values must beNone
+          response must haveKey("contexts_com_example_schema_1.field1")
+          response("contexts_com_example_schema_1.field1").sortable must beFalse
+          response("contexts_com_example_schema_1.field1").filterable must beFalse
+          response("contexts_com_example_schema_1.field1").values must beNone
         }
       }.unsafeRunSync()
     }
@@ -154,14 +154,14 @@ class SqliteStorageSpec extends Specification with EventStorageTimelineSpec with
     "should mark collector_tstamp as sortable but non-filterable, derived_tstamp as non-sortable non-filterable" >> {
       SqliteStorageSpec.freshDbResource.use { storage =>
         storage.getColumnStats(List("collector_tstamp", "derived_tstamp")).map { response =>
-          response.stats must haveKey("collector_tstamp")
-          response.stats must haveKey("derived_tstamp")
-          response.stats("collector_tstamp").sortable must beTrue
-          response.stats("derived_tstamp").sortable must beFalse
-          response.stats("collector_tstamp").filterable must beFalse
-          response.stats("derived_tstamp").filterable must beFalse
-          response.stats("collector_tstamp").values must beNone
-          response.stats("derived_tstamp").values must beNone
+          response must haveKey("collector_tstamp")
+          response must haveKey("derived_tstamp")
+          response("collector_tstamp").sortable must beTrue
+          response("derived_tstamp").sortable must beFalse
+          response("collector_tstamp").filterable must beFalse
+          response("derived_tstamp").filterable must beFalse
+          response("collector_tstamp").values must beNone
+          response("derived_tstamp").values must beNone
         }
       }.unsafeRunSync()
     }
@@ -169,14 +169,14 @@ class SqliteStorageSpec extends Specification with EventStorageTimelineSpec with
     "should mark indexed columns as sortable and filterable" >> {
       SqliteStorageSpec.freshDbResource.use { storage =>
         storage.getColumnStats(List("event_id", "app_id")).map { response =>
-          response.stats must haveKey("event_id")
-          response.stats must haveKey("app_id")
-          response.stats("event_id").sortable must beTrue
-          response.stats("app_id").sortable must beTrue
-          response.stats("event_id").filterable must beTrue
-          response.stats("app_id").filterable must beTrue
-          response.stats("event_id").values mustEqual Some(Nil)
-          response.stats("app_id").values mustEqual Some(Nil)
+          response must haveKey("event_id")
+          response must haveKey("app_id")
+          response("event_id").sortable must beTrue
+          response("app_id").sortable must beTrue
+          response("event_id").filterable must beTrue
+          response("app_id").filterable must beTrue
+          response("event_id").values mustEqual Some(Nil)
+          response("app_id").values mustEqual Some(Nil)
         }
       }.unsafeRunSync()
     }
@@ -184,10 +184,10 @@ class SqliteStorageSpec extends Specification with EventStorageTimelineSpec with
     "should mark non-indexed simple columns as non-sortable, non-filterable" >> {
       SqliteStorageSpec.freshDbResource.use { storage =>
         storage.getColumnStats(List("non_indexed_column")).map { response =>
-          response.stats must haveKey("non_indexed_column")
-          response.stats("non_indexed_column").sortable must beFalse
-          response.stats("non_indexed_column").filterable must beFalse
-          response.stats("non_indexed_column").values must beNone
+          response must haveKey("non_indexed_column")
+          response("non_indexed_column").sortable must beFalse
+          response("non_indexed_column").filterable must beFalse
+          response("non_indexed_column").values must beNone
         }
       }.unsafeRunSync()
     }
@@ -195,10 +195,10 @@ class SqliteStorageSpec extends Specification with EventStorageTimelineSpec with
     "should mark non-existent columns as non-sortable and non-filterable in SQLite mode" >> {
       SqliteStorageSpec.freshDbResource.use { storage =>
         storage.getColumnStats(List("non_existent_column")).map { response =>
-          response.stats must haveKey("non_existent_column")
-          response.stats("non_existent_column").sortable must beFalse
-          response.stats("non_existent_column").filterable must beFalse
-          response.stats("non_existent_column").values must beNone
+          response must haveKey("non_existent_column")
+          response("non_existent_column").sortable must beFalse
+          response("non_existent_column").filterable must beFalse
+          response("non_existent_column").values must beNone
         }
       }.unsafeRunSync()
     }
