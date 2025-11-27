@@ -22,9 +22,7 @@ import org.typelevel.log4cats.Logger
 import org.typelevel.log4cats.slf4j.Slf4jLogger
 
 import java.sql.Timestamp
-import java.time.{Duration, Instant}
-import java.util.concurrent.Executors
-import scala.concurrent.ExecutionContext
+import java.time.Instant
 import scala.concurrent.duration._
 
 /** SQLite-based event storage.
@@ -119,17 +117,19 @@ private[micro] class SqliteStorage(readXa: Transactor[IO], writeXa: Transactor[I
   }
 
   override def getColumnStats(columns: List[String]): IO[ColumnStatsResponse] = {
-    import SqliteStorage.COLUMN_STATS_SCAN_LIMIT
 
     columns.parTraverse { column =>
-      val sortable = column == "collector_tstamp" || SqliteStorage.INDEXED_COLUMNS.contains(column)
-      val filterable = SqliteStorage.INDEXED_COLUMNS.contains(column)
+      val sortable = column === "collector_tstamp" || INDEXED_COLUMNS.contains(column)
+      val filterable = INDEXED_COLUMNS.contains(column)
 
       val distinctValues = if (filterable) {
-        val query = fr"SELECT DISTINCT value FROM (" ++
-          fr"SELECT" ++ Fragment.const(column) ++ fr"as value FROM events" ++
-          fr"ORDER BY timestamp DESC LIMIT ${COLUMN_STATS_SCAN_LIMIT}" ++
-        fr") WHERE value IS NOT NULL LIMIT 20"
+        val frCol = Fragment.const(column)
+        val query = fr"""
+          | SELECT DISTINCT value FROM (
+          |   SELECT $frCol AS value FROM events
+          |   ORDER BY timestamp DESC LIMIT $COLUMN_STATS_SCAN_LIMIT
+          | ) WHERE value IS NOT NULL LIMIT 20
+          |""".stripMargin
 
         query.query[String]
           .to[List]
@@ -169,27 +169,27 @@ private[micro] class SqliteStorage(readXa: Transactor[IO], writeXa: Transactor[I
 
     // Only filter on indexed columns (SQLite mode doesn't support JSON column filtering)
     val columnFilters = request.filters
-      .filter(f => SqliteStorage.INDEXED_COLUMNS.contains(f.column))
+      .filter(f => INDEXED_COLUMNS.contains(f.column))
       .filter(_.value.nonEmpty) // Skip empty filter values
       .map { filter =>
-        fr"AND" ++ Fragment.const(filter.column) ++ fr"=" ++ fr"${filter.value}"
+        val frCol = Fragment.const(filter.column)
+        fr"AND $frCol = ${filter.value}"
       }
 
     val allConditions = whereConditions ++ columnFilters
     val whereClause = allConditions.foldLeft(baseConditions)(_ ++ _)
 
     // Only allow sorting on indexed columns (SQLite mode doesn't support JSON column sorting)
-    val orderByClause = request.sorting.filter(s =>
-      s.column == "collector_tstamp" ||
-        SqliteStorage.INDEXED_COLUMNS.contains(s.column)
-    ).fold(fr"ORDER BY timestamp DESC") { sorting =>
+    val orderByClause = request.sorting.filter { s =>
+        s.column === "collector_tstamp" || INDEXED_COLUMNS.contains(s.column)
+      }.fold(fr"ORDER BY timestamp DESC") { sorting =>
         val columnExpr = if (sorting.column == "collector_tstamp") {
           Fragment.const("timestamp")
         } else {
           Fragment.const(sorting.column)
         }
-        val direction = if (sorting.desc) "DESC" else "ASC"
-        fr"ORDER BY" ++ columnExpr ++ Fragment.const(direction)
+        val direction = Fragment.const(if (sorting.desc) "DESC" else "ASC")
+        fr"ORDER BY $columnExpr $direction"
       }
 
     // prevent OOM when an unreasonably large page size is supplied
@@ -197,10 +197,12 @@ private[micro] class SqliteStorage(readXa: Transactor[IO], writeXa: Transactor[I
     val safePageSize = Math.max(Math.min(request.pageSize, 100), 1)
     val offset = (request.page - 1) * safePageSize
 
-    val countQuery = fr"SELECT COUNT(*) FROM events" ++ whereClause
-    val dataQuery = fr"SELECT event_json FROM events" ++
-      whereClause ++ orderByClause ++
-      fr"LIMIT ${safePageSize} OFFSET ${offset}"
+    val countQuery = fr"SELECT COUNT(*) FROM events $whereClause"
+    val dataQuery = fr"""
+      | SELECT event_json FROM events
+      | $whereClause $orderByClause
+      | LIMIT $safePageSize OFFSET $offset
+      |""".stripMargin
 
     (
       countQuery.query[Int].unique.transact(readXa),
@@ -215,20 +217,16 @@ private[micro] class SqliteStorage(readXa: Transactor[IO], writeXa: Transactor[I
     }
   }
 
-  def cleanupExpiredEvents(ttl: Duration): IO[Unit] = {
-    implicit val logger: Logger[IO] = Slf4jLogger.getLogger[IO]
-    val cutoffTime = Instant.now().minus(ttl)
-    logger.info(s"Running TTL cleanup: deleting events older than $cutoffTime (TTL: $ttl)") *>
-    sql"DELETE FROM events WHERE timestamp < $cutoffTime"
-      .update
-      .run
-      .transact(writeXa)
-      .flatMap { deletedCount =>
-        logger.info(s"TTL cleanup completed: deleted $deletedCount events")
-      }
-  }
+  def cleanupExpiredEvents(ttl: FiniteDuration): IO[Unit] =
+    for {
+      now <- IO.realTimeInstant
+      cutoffTime = now.minusMillis(ttl.toMillis)
+      _ <- logger.info(s"Running TTL cleanup: deleting events older than $cutoffTime (TTL: $ttl)")
+      deletedCount <- sql"DELETE FROM events WHERE timestamp < $cutoffTime".update.run.transact(writeXa)
+      _ <- logger.info(s"TTL cleanup completed: deleted $deletedCount events")
+    } yield ()
 
-  def scheduleCleanup(ttl: Duration, interval: Duration): Resource[IO, Unit] = {
+  def scheduleCleanup(ttl: FiniteDuration, interval: FiniteDuration): Resource[IO, Unit] = {
     Resource.eval(cleanupExpiredEvents(ttl)) *>
     scheduleBackgroundTask(cleanupExpiredEvents(ttl), interval)
   }
@@ -245,22 +243,6 @@ private[micro] object SqliteStorage {
   // Tunable: increase for more coverage, decrease for better performance
   private val COLUMN_STATS_SCAN_LIMIT = 1000
 
-  private def databaseExecutionContext(size: Int): Resource[IO, ExecutionContext] = {
-    Resource.make(
-      IO {
-        val executor = Executors.newFixedThreadPool(size)
-        (ExecutionContext.fromExecutor(executor), executor)
-      }
-    ) { case (_, executor) =>
-      IO {
-        executor.shutdown()
-        // Wait for existing tasks to complete (max 10 seconds)
-        // This prevents race conditions during test cleanup
-        val _ = executor.awaitTermination(10, java.util.concurrent.TimeUnit.SECONDS)
-      }
-    }.map(_._1)
-  }
-
   /** Create SQLite storage with file-based database. */
   def file(dbPath: String): Resource[IO, SqliteStorage] = {
     val params = List(
@@ -273,44 +255,34 @@ private[micro] object SqliteStorage {
     val url = s"jdbc:sqlite:$dbPath?${params.mkString("&")}"
     for {
       // Write transactor: single connection (SQLite only allows 1 writer anyway)
-      writeEc <- databaseExecutionContext(1)
-      writeXa <- HikariTransactor.newHikariTransactor[IO](
-        driverClassName = "org.sqlite.JDBC",
-        url = url,
-        user = "",
-        pass = "",
-        connectEC = writeEc
-      )
-      _ <- Resource.eval(configureDataSource(writeXa, maxPoolSize = 1))
+      writeXa <- transactor(url, maxPoolSize = 1)
 
       // Read transactor: multiple connections for concurrent reads (WAL mode supports this)
-      readEc <- databaseExecutionContext(4)
-      readXa <- HikariTransactor.newHikariTransactor[IO](
-        driverClassName = "org.sqlite.JDBC",
-        url = url,
-        user = "",
-        pass = "",
-        connectEC = readEc
-      )
-      _ <- Resource.eval(configureDataSource(readXa, maxPoolSize = 4))
+      readXa <- transactor(url, maxPoolSize = 4)
 
       _ <- Resource.eval(initialize(writeXa))
-      // Grace period on shutdown: wait for in-flight operations before transactors close
-      _ <- Resource.onFinalize(IO.sleep(2.seconds))
     } yield new SqliteStorage(readXa, writeXa)
   }
 
+  private def transactor(url: String, maxPoolSize: Int): Resource[IO, HikariTransactor[IO]] =
+    for {
+      ec <- ExecutionContexts.fixedThreadPool[IO](maxPoolSize)
+      xa <- HikariTransactor.newHikariTransactor[IO](
+        driverClassName = "org.sqlite.JDBC",
+        url = url,
+        user = "",
+        pass = "",
+        connectEC = ec
+      )
+      _ <- Resource.eval(configureDataSource(xa, maxPoolSize = maxPoolSize))
+    } yield xa
+
   private def configureDataSource(xa: HikariTransactor[IO], maxPoolSize: Int): IO[Unit] = IO {
-    xa.kernel match {
-      case ds: com.zaxxer.hikari.HikariDataSource =>
-        val config = ds.getHikariConfigMXBean
-        config.setMaximumPoolSize(maxPoolSize)
-        config.setMinimumIdle(1)
-        config.setConnectionTimeout(30000)  // 30 second connection timeout
-        config.setIdleTimeout(600000)       // 10 minute idle timeout
-      case other =>
-        throw new IllegalStateException(s"Expected HikariDataSource but got ${other.getClass.getName}")
-    }
+    val config = xa.kernel.getHikariConfigMXBean
+    config.setMaximumPoolSize(maxPoolSize)
+    config.setMinimumIdle(1)
+    config.setConnectionTimeout(30000)  // 30 second connection timeout
+    config.setIdleTimeout(600000)       // 10 minute idle timeout
   }
 
   private def initialize(xa: Transactor[IO]): IO[Unit] =
@@ -356,9 +328,9 @@ private[micro] object SqliteStorage {
       sql"CREATE INDEX IF NOT EXISTS idx_columns_name ON columns(name)".update.run.void
   }
 
-  private def scheduleBackgroundTask(task: => IO[Unit], interval: Duration): Resource[IO, Unit] = {
+  private def scheduleBackgroundTask(task: => IO[Unit], interval: FiniteDuration): Resource[IO, Unit] = {
     Stream
-      .awakeEvery[IO](interval.toMillis.milliseconds)
+      .awakeDelay[IO](interval)
       .evalMap(_ => task)
       .compile
       .drain
