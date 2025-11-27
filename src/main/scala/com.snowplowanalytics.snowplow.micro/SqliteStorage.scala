@@ -356,7 +356,7 @@ private[micro] object SqliteStorage {
       sql"CREATE INDEX IF NOT EXISTS idx_columns_name ON columns(name)".update.run.void
   }
 
-  private def scheduleBackgroundTask(task: IO[Unit], interval: Duration): Resource[IO, Unit] = {
+  private def scheduleBackgroundTask(task: => IO[Unit], interval: Duration): Resource[IO, Unit] = {
     Stream
       .awakeEvery[IO](interval.toMillis.milliseconds)
       .evalMap(_ => task)
