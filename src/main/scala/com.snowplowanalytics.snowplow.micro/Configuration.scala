@@ -51,7 +51,7 @@ object Configuration {
   object StorageConfig {
     case object None extends StorageConfig
     case object InMemory extends StorageConfig
-    case class Persistent(path: Path, maxTtl: Duration, cleanupInterval: Duration) extends StorageConfig
+    case class Persistent(path: Path, ttl: Duration, cleanupInterval: Duration) extends StorageConfig
   }
 
   object Cli {
@@ -59,11 +59,11 @@ object Configuration {
       Uri.fromString(str).leftMap(_ => s"Invalid URI: $str").toValidatedNel
     }
 
-    /** Parse HOCON duration format (e.g., "1h", "30m", "7d") */
-    private def parseDuration(input: String): Either[String, Duration] = {
+    implicit val durationArgument: Argument[Duration] = Argument.from("duration") { str =>
       Either.catchNonFatal {
-        ConfigFactory.parseString(s"duration = $input").getDuration("duration")
-      }.leftMap(_ => s"Invalid duration format: $input. Use HOCON format (e.g., 1h, 30m, 7d)")
+        ConfigFactory.parseString(s"duration = $str").getDuration("duration")
+      }.leftMap(_ => s"Invalid duration format: $str. Use HOCON format (e.g., 1h, 30m, 7d)")
+        .toValidatedNel
     }
 
     final case class Config(collector: Option[Path],
@@ -79,14 +79,12 @@ object Configuration {
     private val outputTsv = Opts.flag("output-tsv", "Output events in TSV format to standard output or HTTP destination", "t").orFalse
     private val outputJson = Opts.flag("output-json", "Output events in JSON format to standard output or HTTP destination (with a separate key for each schema)", "j").orFalse
     private val destination = Opts.option[Uri]("destination", "HTTP(s) URL to send output data to (requires --output-json or --output-tsv)", "d").orNone
-    private val noStorage = Opts.flag("no-storage", "Disable event storage (disables all /micro endpoints)").orFalse
-    private val storagePath = Opts.option[Path]("storage", "Path to an SQLite database file for persistent storage", "s").orNone
-    private val storageTtl = Opts.option[String]("storage-ttl", "Time-to-live for events in persistent storage (HOCON duration, e.g., 1h, 7d, default: 7d)").mapValidated { str =>
-      parseDuration(str).toValidatedNel
-    }.withDefault(Duration.ofDays(7))
-    private val storageCleanupInterval = Opts.option[String]("storage-cleanup-interval", "Interval for cleanup of expired events in persistent storage (HOCON duration, default: 1h)").mapValidated { str =>
-      parseDuration(str).toValidatedNel
-    }.withDefault(Duration.ofHours(1))
+    private val noStorage = Opts.flag("no-storage", "Do not store events anywhere, and disable the API (handy if using Micro purely for output)").orFalse
+    private val storagePath = Opts.option[Path]("storage-file", "Path to an SQLite database file for persistent storage", "s").orNone
+    private val storageTtl = Opts.option[Duration]("storage-ttl", "Time-to-live for events in persistent storage (e.g. 1h, 1d; default: 7d)")
+      .withDefault(Duration.ofDays(7))
+    private val storageCleanupInterval = Opts.option[Duration]("storage-cleanup-interval", "Interval for cleanup of expired events in persistent storage (e.g. 1h, 1d; default: 1h)")
+      .withDefault(Duration.ofHours(1))
     private val yauaa = Opts.flag("yauaa", "Enable YAUAA user agent enrichment").orFalse
     private val auth = Opts.option[Path]("auth", "Configuration file for authentication", "a", "auth.hocon").orNone
 

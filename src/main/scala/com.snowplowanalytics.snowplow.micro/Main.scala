@@ -19,8 +19,9 @@ object Main
     name = s"docker run ${BuildInfo.dockerAlias}",
     header =
       s"""Notes:
-         |    - With --storage, /micro/all, /micro/good and /micro/bad endpoints are not supported.
-         |    - With --no-storage all /micro/* API endpoints are disabled.""".stripMargin,
+         |    - By default, events are stored in memory. This mode supports all API endpoints.
+         |    - With --storage-file (persistent storage), /micro/all, /micro/good and /micro/bad endpoints are not supported.
+         |    - With --no-storage (no in-memory or on-disk storage), all /micro/* endpoints are disabled.""".stripMargin,
     version = BuildInfo.version
   ) {
   override def main: Opts[IO[ExitCode]] = Run.run()
