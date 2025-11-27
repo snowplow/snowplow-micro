@@ -93,21 +93,45 @@ private[micro] class SqliteStorage(readXa: Transactor[IO], writeXa: Transactor[I
       s"(${bucket.start.toEpochMilli}, ${bucket.end.toEpochMilli}, $idx)"
     }.mkString(", ")
 
+    // Split into two queries so that the timestamp + failed index can be used for each
     val query = sql"""
       WITH buckets(bucket_start, bucket_end, bucket_order) AS (
         VALUES """ ++ Fragment.const(bucketValues) ++ sql"""
+      ),
+      valid_counts AS (
+        SELECT
+          bucket_start,
+          bucket_end,
+          bucket_order,
+          COUNT(events.rowid) as valid_count
+        FROM buckets
+        LEFT JOIN events ON events.timestamp >= buckets.bucket_start
+                        AND events.timestamp < buckets.bucket_end
+                        AND events.failed = false
+        GROUP BY bucket_start, bucket_end, bucket_order
+      ),
+      failed_counts AS (
+        SELECT
+          bucket_start,
+          bucket_end,
+          bucket_order,
+          COUNT(events.rowid) as failed_count
+        FROM buckets
+        INNER JOIN events ON events.timestamp >= buckets.bucket_start
+                        AND events.timestamp < buckets.bucket_end
+                        AND events.failed = true
+        GROUP BY bucket_start, bucket_end, bucket_order
       )
       SELECT
-        bucket_start,
-        bucket_end,
-        bucket_order,
-        COUNT(CASE WHEN events.failed = 0 THEN 1 END) as valid_count,
-        COUNT(CASE WHEN events.failed = 1 THEN 1 END) as failed_count
-      FROM buckets
-      LEFT JOIN events ON events.timestamp >= buckets.bucket_start
-                     AND events.timestamp < buckets.bucket_end
-      GROUP BY bucket_start, bucket_end, bucket_order
-      ORDER BY bucket_order
+        v.bucket_start,
+        v.bucket_end,
+        v.bucket_order,
+        COALESCE(v.valid_count, 0) as valid_count,
+        COALESCE(f.failed_count, 0) as failed_count
+      FROM valid_counts v
+      LEFT JOIN failed_counts f ON v.bucket_start = f.bucket_start
+                               AND v.bucket_end = f.bucket_end
+      ORDER BY v.bucket_order
     """
 
     query
