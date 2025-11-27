@@ -116,8 +116,7 @@ export function generateColumns(
       header: ({ column }) => {
         return (
           <DraggableColumn index={index} onReorder={onReorderColumns}>
-            {columnMetadata.isJSON || !isSortable ? (
-              // Sorting not supported for complex columns or non-indexed columns
+            {!isSortable ? (
               <TruncatedColumnName
                 className="px-2"
                 columnMetadata={columnMetadata}
@@ -198,9 +197,8 @@ export function generateColumns(
         // Regular formatting for primitive values - use TruncatedCell for strings
         return <TruncatedCell value={String(value)} />
       },
-      enableSorting: !columnMetadata.isJSON && isSortable,
-      enableColumnFilter:
-        !columnMetadata.isTimestamp && !columnMetadata.isJSON && isFilterable,
+      enableSorting: isSortable,
+      enableColumnFilter: isFilterable,
     }
 
     columns.push(columnDef)
