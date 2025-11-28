@@ -114,7 +114,7 @@ private[micro] class InMemoryStorage extends EventStorage {
 
   override def getColumnStats(columns: List[String]): IO[ColumnStatsResponse] = {
     getEvents.map { jsonEvents =>
-      val stats = columns.map { column =>
+      columns.map { column =>
         // TODO: support complex columns at some point
         val sortable = !EventStorage.isComplexColumn(column)
 
@@ -135,8 +135,6 @@ private[micro] class InMemoryStorage extends EventStorage {
           values = distinctValues
         )
       }.toMap
-
-      stats
     }
   }
 

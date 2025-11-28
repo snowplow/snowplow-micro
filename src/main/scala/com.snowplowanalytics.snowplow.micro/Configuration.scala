@@ -24,19 +24,19 @@ import com.snowplowanalytics.snowplow.collector.core.{Config => CollectorConfig}
 import com.snowplowanalytics.snowplow.enrich.common.adapters.{CallrailSchemas, CloudfrontAccessLogSchemas, GoogleAnalyticsSchemas, HubspotSchemas, MailchimpSchemas, MailgunSchemas, MandrillSchemas, MarketoSchemas, OlarkSchemas, PagerdutySchemas, PingdomSchemas, SendgridSchemas, StatusGatorSchemas, UnbounceSchemas, UrbanAirshipSchemas, VeroSchemas, AdaptersSchemas => EnrichAdaptersSchemas}
 import com.snowplowanalytics.snowplow.enrich.common.enrichments.{AtomicFields, EnrichmentRegistry}
 import com.snowplowanalytics.snowplow.enrich.common.enrichments.registry.EnrichmentConf
-import com.typesafe.config.{ConfigFactory, ConfigParseOptions, Config => TypesafeConfig}
+import com.typesafe.config.{ConfigFactory, ConfigParseOptions, ConfigValueFactory, Config => TypesafeConfig}
 import fs2.io.file.{Files, Path => FS2Path}
 import io.circe.config.syntax.CirceConfigOps
 import io.circe.generic.semiauto.deriveDecoder
-import java.time.Duration
 import io.circe.syntax.EncoderOps
 import io.circe.{Decoder, Json, JsonObject}
+import org.http4s.Uri
 import org.typelevel.log4cats.Logger
 import org.typelevel.log4cats.slf4j.Slf4jLogger
 
 import java.net.URI
 import java.nio.file.{Path, Paths}
-import org.http4s.Uri
+import scala.concurrent.duration.{Duration, DurationInt, FiniteDuration}
 
 object Configuration {
 
@@ -51,7 +51,7 @@ object Configuration {
   object StorageConfig {
     case object None extends StorageConfig
     case object InMemory extends StorageConfig
-    case class Persistent(path: Path, ttl: Duration, cleanupInterval: Duration) extends StorageConfig
+    case class Persistent(path: Path, ttl: FiniteDuration, cleanupInterval: FiniteDuration) extends StorageConfig
   }
 
   object Cli {
@@ -59,9 +59,10 @@ object Configuration {
       Uri.fromString(str).leftMap(_ => s"Invalid URI: $str").toValidatedNel
     }
 
-    implicit val durationArgument: Argument[Duration] = Argument.from("duration") { str =>
+    implicit val durationArgument: Argument[FiniteDuration] = Argument.from("duration") { str =>
       Either.catchNonFatal {
-        ConfigFactory.parseString(s"duration = $str").getDuration("duration")
+        val d = ConfigValueFactory.fromAnyRef(str).atKey("d").getDuration("d")
+        Duration.fromNanos(d.toNanos)
       }.leftMap(_ => s"Invalid duration format: $str. Use HOCON format (e.g., 1h, 30m, 7d)")
         .toValidatedNel
     }
@@ -81,10 +82,10 @@ object Configuration {
     private val destination = Opts.option[Uri]("destination", "HTTP(s) URL to send output data to (requires --output-json or --output-tsv)", "d").orNone
     private val noStorage = Opts.flag("no-storage", "Do not store events anywhere, and disable the API (handy if using Micro purely for output)").orFalse
     private val storagePath = Opts.option[Path]("storage-file", "Path to an SQLite database file for persistent storage", "s").orNone
-    private val storageTtl = Opts.option[Duration]("storage-ttl", "Time-to-live for events in persistent storage (e.g. 1h, 1d; default: 7d)")
-      .withDefault(Duration.ofDays(7))
-    private val storageCleanupInterval = Opts.option[Duration]("storage-cleanup-interval", "Interval for cleanup of expired events in persistent storage (e.g. 1h, 1d; default: 1h)")
-      .withDefault(Duration.ofHours(1))
+    private val storageTtl = Opts.option[FiniteDuration]("storage-ttl", "Time-to-live for events in persistent storage (e.g. 1h, 1d; default: 7d)")
+      .withDefault(7.days)
+    private val storageCleanupInterval = Opts.option[FiniteDuration]("storage-cleanup-interval", "Interval for cleanup of expired events in persistent storage (e.g. 1h, 1d; default: 1h)")
+      .withDefault(1.hour)
     private val yauaa = Opts.flag("yauaa", "Enable YAUAA user agent enrichment").orFalse
     private val auth = Opts.option[Path]("auth", "Configuration file for authentication", "a", "auth.hocon").orNone
 

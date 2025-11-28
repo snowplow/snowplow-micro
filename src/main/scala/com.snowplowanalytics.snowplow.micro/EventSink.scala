@@ -62,10 +62,9 @@ final class EventSink(igluClient: IgluCirceClient[IO],
 
   override def storeRawEvents(events: List[Array[Byte]]): IO[Unit] = {
     events.traverse(collectEventsFromThriftBytes).map { results =>
-      val (allGood, allBad) = results.foldLeft((List.empty[GoodEvent], List.empty[BadEvent])) {
-        case ((good, bad), (g, b)) => (g ++ good, b ++ bad)
+      results.foldLeft((List.empty[GoodEvent], List.empty[BadEvent])) {
+        case ((good, bad), (g, b)) => (g ::: good, b ::: bad)
       }
-      (allGood, allBad)
     }.flatMap { case (goodEvents, badEvents) =>
       storage.addToGood(goodEvents) >>
       storage.addToBad(badEvents) >>

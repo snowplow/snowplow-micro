@@ -15,6 +15,7 @@ import cats.effect.{IO, Resource}
 import org.specs2.mutable.Specification
 import io.circe.Json
 import java.time.{Duration, Instant}
+import scala.concurrent.duration.DurationInt
 
 class SqliteStorageSpec extends Specification with EventStorageTimelineSpec with EventStorageColumnStatsSpec with EventStorageFilteredEventsSpec {
   import InMemoryStorageSpec._
@@ -64,7 +65,7 @@ class SqliteStorageSpec extends Specification with EventStorageTimelineSpec with
         for {
           _ <- storage.addToGood(List(oldEvent, recentEvent))
           eventsBefore <- storage.getFilteredEvents(allEventsRequest)
-          _ <- storage.cleanupExpiredEvents(Duration.ofHours(1))
+          _ <- storage.cleanupExpiredEvents(1.hour)
           eventsAfter <- storage.getFilteredEvents(allEventsRequest)
         } yield {
           eventsBefore.events.size must_== 2
@@ -85,7 +86,7 @@ class SqliteStorageSpec extends Specification with EventStorageTimelineSpec with
         for {
           _ <- storage.addToGood(List(recentEvent1, recentEvent2))
           eventsBefore <- storage.getFilteredEvents(allEventsRequest)
-          _ <- storage.cleanupExpiredEvents(Duration.ofHours(1))
+          _ <- storage.cleanupExpiredEvents(1.hour)
           eventsAfter <- storage.getFilteredEvents(allEventsRequest)
         } yield {
           eventsBefore.events.size must_== 2
@@ -103,7 +104,7 @@ class SqliteStorageSpec extends Specification with EventStorageTimelineSpec with
         for {
           _ <- storage.addToGood(List(oldEvent1, oldEvent2))
           eventsBefore <- storage.getFilteredEvents(allEventsRequest)
-          _ <- storage.cleanupExpiredEvents(Duration.ofHours(1))
+          _ <- storage.cleanupExpiredEvents(1.hour)
           eventsAfter <- storage.getFilteredEvents(allEventsRequest)
         } yield {
           eventsBefore.events.size must_== 2
