@@ -85,8 +85,8 @@ class MicroApiSpec extends Specification with CatsEffect {
     }
   }
 
-  "Micro with --max-events 0 should disable micro endpoints" in {
-    setupWithArgs(List("--max-events", "0")).use { client =>
+  "Micro with --no-storage should disable micro endpoints" in {
+    setupWithArgs(List("--no-storage")).use { client =>
       for {
         allStatus <- client.run(Request(GET, uri"http://localhost:9090/micro/all")).use(r => IO.pure(r.status))
         goodStatus <- client.run(Request(GET, uri"http://localhost:9090/micro/good")).use(r => IO.pure(r.status))

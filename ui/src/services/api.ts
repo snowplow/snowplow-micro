@@ -14,12 +14,16 @@ export type TimelineData = {
 }
 
 export type ColumnStats = {
-  values: string[]
+  sortable: boolean
+  filterable: boolean
+  values?: string[]
 }
 
 export type ColumnStatsRequest = {
   columns: string[]
 }
+
+export type ColumnStatsResponse = Record<string, ColumnStats>
 
 export type EventsFilter = {
   column: string
@@ -154,7 +158,7 @@ export class EventsApiService {
   static async fetchColumnStats(
     columns: string[],
     token?: string | null
-  ): Promise<Record<string, ColumnStats>> {
+  ): Promise<ColumnStatsResponse> {
     const url = new URL('/micro/columnStats', window.location.origin)
 
     const response = await this.makeRequest(url.toString(), {
@@ -171,6 +175,6 @@ export class EventsApiService {
     }
 
     const data = await response.json()
-    return data as Record<string, ColumnStats>
+    return data as ColumnStatsResponse
   }
 }

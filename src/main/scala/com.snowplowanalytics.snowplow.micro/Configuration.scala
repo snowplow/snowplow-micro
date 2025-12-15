@@ -24,18 +24,19 @@ import com.snowplowanalytics.snowplow.collector.core.{Config => CollectorConfig}
 import com.snowplowanalytics.snowplow.enrich.common.adapters.{CallrailSchemas, CloudfrontAccessLogSchemas, GoogleAnalyticsSchemas, HubspotSchemas, MailchimpSchemas, MailgunSchemas, MandrillSchemas, MarketoSchemas, OlarkSchemas, PagerdutySchemas, PingdomSchemas, SendgridSchemas, StatusGatorSchemas, UnbounceSchemas, UrbanAirshipSchemas, VeroSchemas, AdaptersSchemas => EnrichAdaptersSchemas}
 import com.snowplowanalytics.snowplow.enrich.common.enrichments.{AtomicFields, EnrichmentRegistry}
 import com.snowplowanalytics.snowplow.enrich.common.enrichments.registry.EnrichmentConf
-import com.typesafe.config.{ConfigFactory, ConfigParseOptions, Config => TypesafeConfig}
+import com.typesafe.config.{ConfigFactory, ConfigParseOptions, ConfigValueFactory, Config => TypesafeConfig}
 import fs2.io.file.{Files, Path => FS2Path}
 import io.circe.config.syntax.CirceConfigOps
 import io.circe.generic.semiauto.deriveDecoder
 import io.circe.syntax.EncoderOps
 import io.circe.{Decoder, Json, JsonObject}
+import org.http4s.Uri
 import org.typelevel.log4cats.Logger
 import org.typelevel.log4cats.slf4j.Slf4jLogger
 
 import java.net.URI
 import java.nio.file.{Path, Paths}
-import org.http4s.Uri
+import scala.concurrent.duration.{Duration, DurationInt, FiniteDuration}
 
 object Configuration {
 
@@ -50,12 +51,20 @@ object Configuration {
   object StorageConfig {
     case object None extends StorageConfig
     case object InMemory extends StorageConfig
-    case class Persistent(path: Path, maxEvents: Option[Int]) extends StorageConfig
+    case class Persistent(path: Path, ttl: FiniteDuration, cleanupInterval: FiniteDuration) extends StorageConfig
   }
 
   object Cli {
     implicit val uriArgument: Argument[Uri] = Argument.from("uri") { str =>
       Uri.fromString(str).leftMap(_ => s"Invalid URI: $str").toValidatedNel
+    }
+
+    implicit val durationArgument: Argument[FiniteDuration] = Argument.from("duration") { str =>
+      Either.catchNonFatal {
+        val d = ConfigValueFactory.fromAnyRef(str).atKey("d").getDuration("d")
+        Duration.fromNanos(d.toNanos)
+      }.leftMap(_ => s"Invalid duration format: $str. Use HOCON format (e.g., 1h, 30m, 7d)")
+        .toValidatedNel
     }
 
     final case class Config(collector: Option[Path],
@@ -71,8 +80,12 @@ object Configuration {
     private val outputTsv = Opts.flag("output-tsv", "Output events in TSV format to standard output or HTTP destination", "t").orFalse
     private val outputJson = Opts.flag("output-json", "Output events in JSON format to standard output or HTTP destination (with a separate key for each schema)", "j").orFalse
     private val destination = Opts.option[Uri]("destination", "HTTP(s) URL to send output data to (requires --output-json or --output-tsv)", "d").orNone
-    private val storagePath = Opts.option[Path]("storage", "Path to an SQLite database file for persistent storage", "s").orNone
-    private val maxEvents = Opts.option[Int]("max-events", "Maximum number of events to store (enforced approximately, non-zero values require --storage)", "m").orNone
+    private val noStorage = Opts.flag("no-storage", "Do not store events anywhere, and disable the API (handy if using Micro purely for output)").orFalse
+    private val storagePath = Opts.option[Path]("storage-file", "Path to an SQLite database file for persistent storage", "s").orNone
+    private val storageTtl = Opts.option[FiniteDuration]("storage-ttl", "Time-to-live for events in persistent storage (e.g. 1h, 1d; default: 7d)")
+      .withDefault(7.days)
+    private val storageCleanupInterval = Opts.option[FiniteDuration]("storage-cleanup-interval", "Interval for cleanup of expired events in persistent storage (e.g. 1h, 1d; default: 1h)")
+      .withDefault(1.hour)
     private val yauaa = Opts.flag("yauaa", "Enable YAUAA user agent enrichment").orFalse
     private val auth = Opts.option[Path]("auth", "Configuration file for authentication", "a", "auth.hocon").orNone
 
@@ -86,14 +99,19 @@ object Configuration {
         case (true, true, _) => "Cannot specify both --output-tsv and --output-json".invalidNel[(OutputFormat, Option[Uri])]
       }
 
-    private val storage = (maxEvents, storagePath)
-      .mapN { (_, _) }
+    private val storage = (noStorage, storagePath, storageTtl, storageCleanupInterval)
+      .mapN { (_, _, _, _) }
       .mapValidated {
-        case (Some(0), None) => StorageConfig.None.validNel[String]
-        case (Some(0), Some(_)) => "--storage cannot be used with --max-events 0".invalidNel[StorageConfig]
-        case (Some(_), None) => "--max-events > 0 requires --storage".invalidNel[StorageConfig]
-        case (limit, Some(path)) => StorageConfig.Persistent(path, limit).validNel[String]
-        case (None, None) => StorageConfig.InMemory.validNel[String]
+        case (true, _, _, _) =>
+          StorageConfig.None.validNel[String]
+        case (_, _, ttl, _) if ttl.toMinutes < 5 =>
+          "--storage-ttl must be at least 5 minutes (5m)".invalidNel[StorageConfig]
+        case (_, _, _, cleanupInterval) if cleanupInterval.toMinutes < 1 =>
+          "--storage-cleanup-interval must be at least 1 minute (1m)".invalidNel[StorageConfig]
+        case (_, None, _, _) =>
+          StorageConfig.InMemory.validNel[String]
+        case (_, Some(path), ttl, cleanupInterval) =>
+          StorageConfig.Persistent(path, ttl, cleanupInterval).validNel[String]
       }
 
     val config: Opts[Config] = (collector, iglu, output, yauaa, storage, auth).mapN {

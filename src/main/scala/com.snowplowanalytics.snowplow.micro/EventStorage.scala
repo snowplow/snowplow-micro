@@ -12,6 +12,7 @@ package com.snowplowanalytics.snowplow.micro
 
 import cats.effect.{IO, Resource}
 import com.snowplowanalytics.snowplow.micro.Configuration.StorageConfig
+import com.snowplowanalytics.snowplow.micro.model.ColumnStatsResponse
 import io.circe.Json
 
 import java.time.Instant
@@ -24,7 +25,7 @@ trait EventStorage {
   def reset(): IO[Unit]
   def getColumns: IO[List[String]]
   def getTimeline: IO[TimelineData]
-  def getColumnStats(columns: List[String]): IO[Map[String, ColumnStats]]
+  def getColumnStats(columns: List[String]): IO[ColumnStatsResponse]
   def getFilteredEvents(request: EventsRequest): IO[EventsResponse]
 }
 
@@ -34,7 +35,7 @@ object NoStorage extends EventStorage {
   def reset(): IO[Unit] = IO.unit
   def getColumns: IO[List[String]] = IO.pure(List.empty)
   def getTimeline: IO[TimelineData] = IO.pure(TimelineData(List.empty))
-  def getColumnStats(columns: List[String]): IO[Map[String, ColumnStats]] = IO.pure(Map.empty)
+  def getColumnStats(columns: List[String]): IO[ColumnStatsResponse] = IO.pure(Map.empty)
   def getFilteredEvents(request: EventsRequest): IO[EventsResponse] = IO.pure(EventsResponse(List.empty, 0, 0))
 }
 
@@ -43,8 +44,11 @@ object EventStorage {
     config match {
       case StorageConfig.None =>
         Resource.pure(NoStorage)
-      case StorageConfig.Persistent(path, maxEvents) =>
-        SqliteStorage.file(path.toString, maxEvents)
+      case StorageConfig.Persistent(path, ttl, cleanupInterval) =>
+        for {
+          storage <- SqliteStorage.file(path.toString)
+          _ <- storage.scheduleCleanup(ttl, cleanupInterval)
+        } yield storage
       case StorageConfig.InMemory =>
         Resource.pure(new InMemoryStorage())
     }

@@ -57,8 +57,16 @@ final case class TimelinePoint(validEvents: Int, failedEvents: Int, timestamp: I
 final case class TimelineData(points: List[TimelinePoint])
 
 /** Column statistics data structures for /micro/columnStats endpoint. */
-final case class ColumnStats(values: List[String])
+final case class ColumnStats(
+  sortable: Boolean,
+  filterable: Boolean,
+  values: Option[List[String]] = None
+)
 final case class ColumnStatsRequest(columns: List[String])
+
+object model {
+  type ColumnStatsResponse = Map[String, ColumnStats]
+}
 
 /** Server-side filtering, sorting, and pagination for /micro/events endpoint. */
 final case class EventsFilter(

@@ -3,3 +3,4 @@ config/
 .DS_Store
 .bsp/
 .idea/
+stream-collector

@@ -29,6 +29,7 @@ import org.apache.http.NameValuePair
 import org.http4s.circe.CirceEntityDecoder._
 import org.http4s.circe.CirceEntityEncoder._
 import org.http4s.dsl.Http4sDsl
+import org.http4s.server.middleware.GZip
 import org.http4s.{AuthedRoutes, HttpRoutes, Response, StaticFile}
 import org.joda.time.DateTime
 
@@ -148,7 +149,7 @@ final class InMemoryRoutes(protected val igluResolver: Resolver[IO],
       NotFound(s"Supported endpoints: /micro/all, /micro/good, /micro/bad, ${commonEndpoints.mkString(", ")}")
   }
 
-  val routes: HttpRoutes[IO] = addAuthMiddleware(commonRoutes <+> inMemoryRoutes)
+  val routes: HttpRoutes[IO] = GZip(addAuthMiddleware(commonRoutes <+> inMemoryRoutes))
 }
 
 final class SqliteRoutes(protected val igluResolver: Resolver[IO],
@@ -160,7 +161,7 @@ final class SqliteRoutes(protected val igluResolver: Resolver[IO],
       NotFound(s"Supported endpoints: ${commonEndpoints.mkString(", ")}")
   }
 
-  val routes: HttpRoutes[IO] = addAuthMiddleware(commonRoutes <+> sqliteRoutes)
+  val routes: HttpRoutes[IO] = GZip(addAuthMiddleware(commonRoutes <+> sqliteRoutes))
 }
 
 object NoRoutes extends Http4sDsl[IO] {

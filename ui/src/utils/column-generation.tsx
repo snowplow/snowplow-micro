@@ -1,7 +1,7 @@
 import type { ColumnDef } from '@tanstack/react-table'
 import { Button } from '@/components/ui/button'
 import { ArrowUp, ArrowDown, Eye, Check, X } from 'lucide-react'
-import type { Event } from '@/services/api'
+import type { Event, ColumnStats } from '@/services/api'
 import { DraggableColumn } from '@/components/DraggableColumn'
 import { TruncatedCell } from '@/components/TruncatedCell'
 import { TruncatedColumnName } from '@/components/TruncatedColumnName'
@@ -27,7 +27,7 @@ export function generateColumns(
   selectedCellId: string | null,
   onJsonCellToggle: (cellId: string, value: any, title: string) => void,
   onReorderColumns: (fromIndex: number, toIndex: number) => void,
-  columnStats?: Record<string, { values: string[] }>
+  columnStats: Record<string, ColumnStats>
 ): EventColumnDef[] {
   const columns: EventColumnDef[] = []
 
@@ -99,8 +99,11 @@ export function generateColumns(
   selectedColumns.forEach((columnMetadata, index) => {
     const { name: fieldName } = columnMetadata
 
-    // Use backend columnStats if available, otherwise no autocomplete
-    const distinctValues = columnStats?.[fieldName]?.values ?? []
+    // Use backend-provided sortable/filterable flags
+    const stats = columnStats[fieldName]
+    const isSortable = stats?.sortable ?? false
+    const isFilterable = stats?.filterable ?? false
+    const distinctValues = stats?.values ?? []
     const useAutocomplete = distinctValues.length > 0
 
     const columnDef: EventColumnDef = {
@@ -113,9 +116,12 @@ export function generateColumns(
       header: ({ column }) => {
         return (
           <DraggableColumn index={index} onReorder={onReorderColumns}>
-            {columnMetadata.isJSON ?
-              // Sorting currently not supported for complex columns
-              <TruncatedColumnName className="px-2" columnMetadata={columnMetadata} /> :
+            {!isSortable ? (
+              <TruncatedColumnName
+                className="px-2"
+                columnMetadata={columnMetadata}
+              />
+            ) : (
               <Button
                 variant="ghost"
                 onClick={() =>
@@ -135,7 +141,7 @@ export function generateColumns(
                   )}
                 </div>
               </Button>
-            }
+            )}
           </DraggableColumn>
         )
       },
@@ -191,8 +197,8 @@ export function generateColumns(
         // Regular formatting for primitive values - use TruncatedCell for strings
         return <TruncatedCell value={String(value)} />
       },
-      enableSorting: !columnMetadata.isJSON,
-      enableColumnFilter: !columnMetadata.isTimestamp && !columnMetadata.isJSON,
+      enableSorting: isSortable,
+      enableColumnFilter: isFilterable,
     }
 
     columns.push(columnDef)

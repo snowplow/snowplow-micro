@@ -46,7 +46,7 @@ type DataTableProps = {
   onJsonCellToggle: (cellId: string, value: any, title: string) => void
   onReorderColumns: (fromIndex: number, toIndex: number) => void
   onRowClick: (rowId: string, event: Event) => void
-  columnStats?: Record<string, ColumnStats>
+  columnStats: Record<string, ColumnStats>
   currentPage: number
   totalPages: number
   totalItems: number
@@ -76,7 +76,6 @@ export function DataTable({
   onSortingChange,
   isLoading,
 }: DataTableProps) {
-
   // Events are already in the correct format for react-table
 
   // Generate columns dynamically
@@ -114,9 +113,7 @@ export function DataTable({
   const pageSize = 50
   const startRow = events.length > 0 ? (currentPage - 1) * pageSize + 1 : 0
   const endRow =
-    events.length > 0
-      ? Math.min(startRow + events.length - 1, totalItems)
-      : 0
+    events.length > 0 ? Math.min(startRow + events.length - 1, totalItems) : 0
 
   return (
     <TooltipProvider delayDuration={300}>
@@ -125,7 +122,9 @@ export function DataTable({
           {/* Table container with scrolling */}
           <div className="flex-1 overflow-auto rounded-md border bg-background">
             <Table className="table-auto">
-              <TableHeader className={isLoading ? 'gradient-loading-border' : ''}>
+              <TableHeader
+                className={isLoading ? 'gradient-loading-border' : ''}
+              >
                 {table.getHeaderGroups().map((headerGroup) => (
                   <React.Fragment key={headerGroup.id}>
                     <TableRow>

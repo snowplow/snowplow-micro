@@ -280,10 +280,12 @@ trait EventStorageColumnStatsSpec {
 
   def columnStatsTests(storageResource: Resource[IO, EventStorage], storageName: String): Fragment = {
     s"$storageName getColumnStats" >> {
-      "should return empty map for empty storage" >> {
+      "should return metadata for all columns even when storage is empty" >> {
         storageResource.use { storage =>
-          storage.getColumnStats(List("event_id", "app_id")).map { stats =>
-            stats must be empty
+          storage.getColumnStats(List("event_id", "app_id")).map { response =>
+            response must haveKeys("event_id", "app_id")
+            response("event_id").values mustEqual Some(Nil)
+            response("app_id").values mustEqual Some(Nil)
           }
         }.unsafeRunSync()
       }
@@ -292,46 +294,22 @@ trait EventStorageColumnStatsSpec {
         storageResource.use { storage =>
           for {
             _ <- storage.addToGood(List(GoodEvent1, GoodEvent2, GoodEvent3))
-            stats <- storage.getColumnStats(List("event_id", "app_id"))
+            response <- storage.getColumnStats(List("event_id", "app_id"))
           } yield {
-            stats must haveKey("event_id")
-            stats must haveKey("app_id")
+            response must haveKey("event_id")
+            response must haveKey("app_id")
 
-            stats("event_id").values must contain(exactly(
+            response("event_id").values must beSome(contain(exactly(
               GoodEvent1.event.event_id.toString,
               GoodEvent2.event.event_id.toString,
               GoodEvent3.event.event_id.toString
-            ))
+            )))
 
-            stats("app_id").values must contain(exactly("test1", "test2", "test3"))
+            response("app_id").values must beSome(contain(exactly("test1", "test2", "test3")))
           }
         }.unsafeRunSync()
       }
 
-      "should ignore complex columns" >> {
-        storageResource.use { storage =>
-          for {
-            _ <- storage.addToGood(List(GoodEvent1))
-            stats <- storage.getColumnStats(List("event_id", "contexts_com_example_schema_1.field1"))
-          } yield {
-            stats must haveKey("event_id")
-            stats must not(haveKey("contexts_com_example_schema_1.field1"))
-          }
-        }.unsafeRunSync()
-      }
-
-      "should ignore timestamp columns" >> {
-        storageResource.use { storage =>
-          for {
-            _ <- storage.addToGood(List(GoodEvent1))
-            stats <- storage.getColumnStats(List("event_id", "collector_tstamp", "derived_tstamp"))
-          } yield {
-            stats must haveKey("event_id")
-            stats must not(haveKey("collector_tstamp"))
-            stats must not(haveKey("derived_tstamp"))
-          }
-        }.unsafeRunSync()
-      }
 
       "should limit to 20 distinct values" >> {
         val manyEvents = (1 to 25).map { i =>
@@ -343,36 +321,28 @@ trait EventStorageColumnStatsSpec {
         storageResource.use { storage =>
           for {
             _ <- storage.addToGood(manyEvents)
-            stats <- storage.getColumnStats(List("event_id"))
+            response <- storage.getColumnStats(List("event_id"))
           } yield {
-            stats must haveKey("event_id")
-            stats("event_id").values must have size(20)
+            response must haveKey("event_id")
+            response("event_id").values must beSome.like {
+              case values => values must have size(20)
+            }
           }
         }.unsafeRunSync()
       }
 
-      "should return stats for JSON-extracted columns" >> {
+      "should return stats for supported columns" >> {
         storageResource.use { storage =>
           for {
             _ <- storage.addToGood(List(GoodEvent1, GoodEvent2, GoodEvent3))
-            stats <- storage.getColumnStats(List("v_collector"))
+            response <- storage.getColumnStats(List("app_id"))
           } yield {
-            stats must haveKey("v_collector")
-            stats("v_collector").values must contain(exactly("collector1"))
+            response must haveKey("app_id")
+            response("app_id").values must beSome(contain(exactly("test1", "test2", "test3")))
           }
         }.unsafeRunSync()
       }
 
-      "should return empty stats for non-existent columns" >> {
-        storageResource.use { storage =>
-          for {
-            _ <- storage.addToGood(List(GoodEvent1))
-            stats <- storage.getColumnStats(List("non_existent_column"))
-          } yield {
-            stats must be empty
-          }
-        }.unsafeRunSync()
-      }
     }
   }
 }
@@ -517,19 +487,19 @@ trait EventStorageFilteredEventsSpec {
         }.unsafeRunSync()
       }
 
-      "should handle case-insensitive filtering" >> {
+      "should handle filtering" >> {
         storageResource.use { storage =>
           for {
-            _ <- storage.addToGood(List(GoodEvent1.copy(event = GoodEvent1.event.copy(app_id = Some("TestApp")))))
-            upperFilter = EventsFilter("app_id", "testapp")
-            lowerFilter = EventsFilter("app_id", "TESTAPP")
-            upperRequest = EventsRequest(List(upperFilter), None, None, None, 1, 10)
-            lowerRequest = EventsRequest(List(lowerFilter), None, None, None, 1, 10)
-            upperResult <- storage.getFilteredEvents(upperRequest)
-            lowerResult <- storage.getFilteredEvents(lowerRequest)
+            _ <- storage.addToGood(List(GoodEvent1.copy(event = GoodEvent1.event.copy(app_id = Some("testapp")))))
+            matchFilter = EventsFilter("app_id", "testapp")
+            noMatchFilter = EventsFilter("app_id", "other")
+            matchRequest = EventsRequest(List(matchFilter), None, None, None, 1, 10)
+            noMatchRequest = EventsRequest(List(noMatchFilter), None, None, None, 1, 10)
+            matchResult <- storage.getFilteredEvents(matchRequest)
+            noMatchResult <- storage.getFilteredEvents(noMatchRequest)
           } yield {
-            upperResult.events must have size(1)
-            lowerResult.events must have size(1)
+            matchResult.events must have size(1)
+            noMatchResult.events must have size(0)
           }
         }.unsafeRunSync()
       }

@@ -77,8 +77,8 @@ function App() {
   const updateColumnStats = async (columnNames: string[]) => {
     try {
       const token = await getAccessToken()
-      const stats = await EventsApiService.fetchColumnStats(columnNames, token)
-      setColumnStats(stats)
+      const response = await EventsApiService.fetchColumnStats(columnNames, token)
+      setColumnStats(response)
     } catch (err) {
       console.warn('Failed to fetch column stats:', err)
     }
@@ -314,7 +314,7 @@ function App() {
 
     const timeoutId = setTimeout(() => {
       fetchEventsWithFilters()
-    }, 100)
+    }, 400)
 
     return () => clearTimeout(timeoutId)
   }, [columnFilters, selectedMinute, currentPage, sorting, isAuthenticated])
