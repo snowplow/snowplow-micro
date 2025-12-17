@@ -17,13 +17,15 @@ import io.circe.Json
 import java.time.{Duration, Instant}
 import scala.concurrent.duration.DurationInt
 
-class SqliteStorageSpec extends Specification with EventStorageTimelineSpec with EventStorageColumnStatsSpec with EventStorageFilteredEventsSpec {
+class PostgresqlStorageSpec extends Specification with EventStorageTimelineSpec with EventStorageColumnStatsSpec with EventStorageFilteredEventsSpec {
   import InMemoryStorageSpec._
-  import SqliteStorageSpec._
+  import PostgresqlStorageSpec._
+
+  sequential
 
   "addToGood" >> {
     "should store good events and ignore bad events" >> {
-      withSqliteStorage { storage =>
+      withPostgresqlStorage { storage =>
         for {
           _ <- storage.addToGood(List(GoodEvent1, GoodEvent2))
           _ <- storage.addToBad(List(BadEvent1))
@@ -40,7 +42,7 @@ class SqliteStorageSpec extends Specification with EventStorageTimelineSpec with
 
   "reset" >> {
     "should clear all events" >> {
-      withSqliteStorage { storage =>
+      withPostgresqlStorage { storage =>
         for {
           _ <- storage.addToGood(List(GoodEvent1, GoodEvent2))
           eventsBefore <- storage.getFilteredEvents(allEventsRequest)
@@ -56,7 +58,7 @@ class SqliteStorageSpec extends Specification with EventStorageTimelineSpec with
 
   "cleanupExpiredEvents" >> {
     "should delete events older than TTL" >> {
-      withSqliteStorage { storage =>
+      withPostgresqlStorage { storage =>
         // Create events with different timestamps
         val now = Instant.now()
         val oldEvent = GoodEvent1.copy(event = GoodEvent1.event.copy(collector_tstamp = now.minus(Duration.ofHours(2))))
@@ -78,7 +80,7 @@ class SqliteStorageSpec extends Specification with EventStorageTimelineSpec with
     }
 
     "should keep all events when none exceed TTL" >> {
-      withSqliteStorage { storage =>
+      withPostgresqlStorage { storage =>
         val now = Instant.now()
         val recentEvent1 = GoodEvent1.copy(event = GoodEvent1.event.copy(collector_tstamp = now.minus(Duration.ofMinutes(10))))
         val recentEvent2 = GoodEvent2.copy(event = GoodEvent2.event.copy(collector_tstamp = now.minus(Duration.ofMinutes(5))))
@@ -96,7 +98,7 @@ class SqliteStorageSpec extends Specification with EventStorageTimelineSpec with
     }
 
     "should delete all events when all exceed TTL" >> {
-      withSqliteStorage { storage =>
+      withPostgresqlStorage { storage =>
         val now = Instant.now()
         val oldEvent1 = GoodEvent1.copy(event = GoodEvent1.event.copy(collector_tstamp = now.minus(Duration.ofHours(3))))
         val oldEvent2 = GoodEvent2.copy(event = GoodEvent2.event.copy(collector_tstamp = now.minus(Duration.ofHours(2))))
@@ -116,7 +118,7 @@ class SqliteStorageSpec extends Specification with EventStorageTimelineSpec with
 
   "getEvents" >> {
     "should return events as JSON" >> {
-      withSqliteStorage { storage =>
+      withPostgresqlStorage { storage =>
         for {
           _ <- storage.addToGood(List(GoodEvent1))
           events <- storage.getFilteredEvents(allEventsRequest)
@@ -130,19 +132,19 @@ class SqliteStorageSpec extends Specification with EventStorageTimelineSpec with
     }
 
     "should return empty list when no events" >> {
-      withSqliteStorage { storage =>
+      withPostgresqlStorage { storage =>
         storage.getFilteredEvents(allEventsRequest).map(_.events.size must_== 0)
       }
     }
   }
 
-  timelineTests(SqliteStorageSpec.freshDbResource, "SqliteStorage")
-  columnStatsTests(SqliteStorageSpec.freshDbResource, "SqliteStorage")
-  filteredEventsTests(SqliteStorageSpec.freshDbResource, "SqliteStorage")
+  timelineTests(PostgresqlStorageSpec.postgresResource, "PostgresqlStorage")
+  columnStatsTests(PostgresqlStorageSpec.postgresResource, "PostgresqlStorage")
+  filteredEventsTests(PostgresqlStorageSpec.postgresResource, "PostgresqlStorage")
 
-  "SqliteStorage specific column stats behavior" >> {
+  "PostgresqlStorage specific column stats behavior" >> {
     "should mark non-indexed complex columns as non-sortable, non-filterable" >> {
-      SqliteStorageSpec.freshDbResource.use { storage =>
+      PostgresqlStorageSpec.postgresResource.use { storage =>
         storage.getColumnStats(List("contexts_com_example_schema_1.field1")).map { response =>
           response must haveKey("contexts_com_example_schema_1.field1")
           response("contexts_com_example_schema_1.field1").sortable must beFalse
@@ -153,7 +155,7 @@ class SqliteStorageSpec extends Specification with EventStorageTimelineSpec with
     }
 
     "should mark collector_tstamp as sortable but non-filterable, derived_tstamp as non-sortable non-filterable" >> {
-      SqliteStorageSpec.freshDbResource.use { storage =>
+      PostgresqlStorageSpec.postgresResource.use { storage =>
         storage.getColumnStats(List("collector_tstamp", "derived_tstamp")).map { response =>
           response must haveKey("collector_tstamp")
           response must haveKey("derived_tstamp")
@@ -168,7 +170,7 @@ class SqliteStorageSpec extends Specification with EventStorageTimelineSpec with
     }
 
     "should mark indexed columns as sortable and filterable" >> {
-      SqliteStorageSpec.freshDbResource.use { storage =>
+      PostgresqlStorageSpec.postgresResource.use { storage =>
         storage.getColumnStats(List("event_id", "app_id")).map { response =>
           response must haveKey("event_id")
           response must haveKey("app_id")
@@ -183,7 +185,7 @@ class SqliteStorageSpec extends Specification with EventStorageTimelineSpec with
     }
 
     "should mark non-indexed simple columns as non-sortable, non-filterable" >> {
-      SqliteStorageSpec.freshDbResource.use { storage =>
+      PostgresqlStorageSpec.postgresResource.use { storage =>
         storage.getColumnStats(List("non_indexed_column")).map { response =>
           response must haveKey("non_indexed_column")
           response("non_indexed_column").sortable must beFalse
@@ -193,8 +195,8 @@ class SqliteStorageSpec extends Specification with EventStorageTimelineSpec with
       }.unsafeRunSync()
     }
 
-    "should mark non-existent columns as non-sortable and non-filterable in SQLite mode" >> {
-      SqliteStorageSpec.freshDbResource.use { storage =>
+    "should mark non-existent columns as non-sortable and non-filterable in PostgreSQL mode" >> {
+      PostgresqlStorageSpec.postgresResource.use { storage =>
         storage.getColumnStats(List("non_existent_column")).map { response =>
           response must haveKey("non_existent_column")
           response("non_existent_column").sortable must beFalse
@@ -206,39 +208,21 @@ class SqliteStorageSpec extends Specification with EventStorageTimelineSpec with
   }
 }
 
-object SqliteStorageSpec {
+object PostgresqlStorageSpec {
   val allEventsRequest = EventsRequest(List.empty, None, None, None, 1, 100)
 
-  private def createTempDbPath(): String = {
-    val tmpDir = System.getProperty("java.io.tmpdir")
-    s"$tmpDir/snowplow-micro-test-${System.nanoTime()}.db"
+  def postgresResource: Resource[IO, PostgresqlStorage] = {
+    PostgresqlStorage.create(
+      host = "localhost",
+      port = 5432,
+      database = "micro_test",
+      user = "test_user",
+      password = "test_password"
+    ).evalTap(_.reset())
   }
 
-  private def createTempDbResource(): Resource[IO, SqliteStorage] = {
-    Resource.make(IO(createTempDbPath()))(path => IO {
-      // Clean up database file and WAL files after test
-      new java.io.File(path).delete()
-      new java.io.File(s"$path-shm").delete()
-      new java.io.File(s"$path-wal").delete()
-      ()
-    }).flatMap(SqliteStorage.file)
-  }
-
-  def freshDbResource: Resource[IO, EventStorage] = {
-    for {
-      path <- Resource.eval(IO(createTempDbPath()))
-      storage <- Resource.make(IO(path))(path => IO {
-        // Clean up database file and WAL files after test
-        new java.io.File(path).delete()
-        new java.io.File(s"$path-shm").delete()
-        new java.io.File(s"$path-wal").delete()
-        ()
-      }).flatMap(SqliteStorage.file)
-    } yield storage
-  }
-
-  def withSqliteStorage[A](test: SqliteStorage => IO[A]): A = {
-    createTempDbResource()
+  def withPostgresqlStorage[A](test: PostgresqlStorage => IO[A]): A = {
+    postgresResource
       .use(test)
       .unsafeRunSync()
   }

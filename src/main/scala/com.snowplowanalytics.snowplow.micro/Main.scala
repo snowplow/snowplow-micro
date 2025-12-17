@@ -20,8 +20,8 @@ object Main
     header =
       s"""Notes:
          |    - By default, events are stored in memory. This mode supports all API endpoints.
-         |    - With --storage-file (persistent storage), /micro/all, /micro/good and /micro/bad endpoints are not supported.
-         |    - With --no-storage (no in-memory or on-disk storage), all /micro/* endpoints are disabled.""".stripMargin,
+         |    - With --storage (PostgreSQL storage), /micro/all, /micro/good and /micro/bad endpoints are not supported.
+         |    - With --no-storage (no in-memory or database storage), all /micro/* endpoints are disabled.""".stripMargin,
     version = BuildInfo.version
   ) {
   override def main: Opts[IO[ExitCode]] = Run.run()

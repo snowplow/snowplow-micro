@@ -25,7 +25,7 @@ object Dependencies {
     val decline     = "2.4.1"
     val slf4j       = "2.0.17"
     val doobie      = "1.0.0-RC10"
-    val sqlite      = "3.50.3.0"
+    val postgresql  = "42.7.8"
 
     // specs2
     val specs2   = "4.12.2"
@@ -55,11 +55,13 @@ object Dependencies {
   val circeGeneric = "io.circe" %% "circe-generic" % V.circe
 
   // doobie
-  val doobieCore   = "org.tpolecat" %% "doobie-core"   % V.doobie
-  val doobieHikari = "org.tpolecat" %% "doobie-hikari" % V.doobie
+  val doobieCore           = "org.tpolecat" %% "doobie-core"           % V.doobie
+  val doobieHikari         = "org.tpolecat" %% "doobie-hikari"         % V.doobie
+  val doobiePostgres       = "org.tpolecat" %% "doobie-postgres"       % V.doobie
+  val doobiePostgresCirce  = "org.tpolecat" %% "doobie-postgres-circe" % V.doobie
 
-  // sqlite
-  val sqliteJdbc = "org.xerial" % "sqlite-jdbc" % V.sqlite
+  // postgresql
+  val postgresqlJdbc = "org.postgresql" % "postgresql" % V.postgresql
 
   // specs2
   val specs2   = "org.specs2"     %% "specs2-core"                % V.specs2   % Test
