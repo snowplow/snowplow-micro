@@ -154,16 +154,16 @@ final class InMemoryRoutes(protected val igluResolver: Resolver[IO],
   val routes: HttpRoutes[IO] = GZip(addAuthMiddleware(commonRoutes <+> inMemoryRoutes))
 }
 
-final class SqliteRoutes(protected val igluResolver: Resolver[IO],
-                         protected val storage: SqliteStorage,
-                         protected val authConfig: Option[AuthConfig])
-                        (implicit protected val lookup: RegistryLookup[IO]) extends MicroRoutes[SqliteStorage] {
-  private val sqliteRoutes: HttpRoutes[IO] = HttpRoutes.of[IO] {
+final class PostgresqlRoutes(protected val igluResolver: Resolver[IO],
+                             protected val storage: PostgresqlStorage,
+                             protected val authConfig: Option[AuthConfig])
+                            (implicit protected val lookup: RegistryLookup[IO]) extends MicroRoutes[PostgresqlStorage] {
+  private val postgresqlRoutes: HttpRoutes[IO] = HttpRoutes.of[IO] {
     case _ -> "micro" /: _ =>
       NotFound(s"Supported endpoints: ${commonEndpoints.mkString(", ")}")
   }
 
-  val routes: HttpRoutes[IO] = GZip(addAuthMiddleware(commonRoutes <+> sqliteRoutes))
+  val routes: HttpRoutes[IO] = GZip(addAuthMiddleware(commonRoutes <+> postgresqlRoutes))
 }
 
 object NoRoutes extends Http4sDsl[IO] {
@@ -176,8 +176,8 @@ object Routing {
   def create(config: Configuration.MicroConfig, storage: EventStorage, auth: Option[AuthConfig], lookup: RegistryLookup[IO]): HttpRoutes[IO] = {
     storage match {
       case NoStorage => NoRoutes.routes
-      case sqliteStorage: SqliteStorage =>
-        new SqliteRoutes(config.iglu.resolver, sqliteStorage, auth)(lookup).routes
+      case postgresqlStorage: PostgresqlStorage =>
+        new PostgresqlRoutes(config.iglu.resolver, postgresqlStorage, auth)(lookup).routes
       case inMemoryStorage: InMemoryStorage =>
         new InMemoryRoutes(config.iglu.resolver, inMemoryStorage, auth)(lookup).routes
     }

@@ -16,8 +16,10 @@ import com.snowplowanalytics.snowplow.micro.model.ColumnStatsResponse
 import doobie._
 import doobie.implicits._
 import doobie.hikari.HikariTransactor
+import doobie.postgres.implicits._
+import doobie.postgres.circe.jsonb.implicits._
 import fs2.Stream
-import io.circe.parser
+import io.circe.Json
 import org.typelevel.log4cats.Logger
 import org.typelevel.log4cats.slf4j.Slf4jLogger
 
@@ -25,14 +27,13 @@ import java.sql.Timestamp
 import java.time.Instant
 import scala.concurrent.duration._
 
-/** SQLite-based event storage.
+/** PostgreSQL-based event storage.
  * Only stores the Analytics SDK JSON representation of valid and failed (incomplete) events.
- * Uses separate transactors for reads and writes to allow concurrent access in WAL mode.
   */
-private[micro] class SqliteStorage(readXa: Transactor[IO], writeXa: Transactor[IO]) extends EventStorage {
-  import SqliteStorage._
+private[micro] class PostgresqlStorage(xa: Transactor[IO]) extends EventStorage {
+  import PostgresqlStorage._
 
-  /** Add events to SQLite storage. */
+  /** Add events to PostgreSQL storage. */
   override def addToGood(events: List[GoodEvent]): IO[Unit] = {
     if (events.nonEmpty) {
       val eventJsons = events.map(_.event.toJson(lossy = true))
@@ -44,43 +45,43 @@ private[micro] class SqliteStorage(readXa: Transactor[IO], writeXa: Transactor[I
         val nameTracker = goodEvent.event.name_tracker
         val domainUserid = goodEvent.event.domain_userid
         val vTracker = goodEvent.event.v_tracker
-        (goodEvent.event.event_id.toString, goodEvent.event.collector_tstamp, eventJson.noSpaces, goodEvent.incomplete, appId, eventName, platform, nameTracker, domainUserid, vTracker)
+        (goodEvent.event.event_id.toString, goodEvent.event.collector_tstamp, eventJson, goodEvent.incomplete, appId, eventName, platform, nameTracker, domainUserid, vTracker)
       }
 
       val allColumns = eventJsons.map(EventStorage.extractColumnsFromEvent)
         .reduce(_.union(_)).toList
 
       val insertEventsProgram = {
-        val sql = "INSERT OR IGNORE INTO events (event_id, timestamp, event_json, failed, app_id, event_name, platform, name_tracker, domain_userid, v_tracker) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-        Update[(String, Instant, String, Boolean, Option[String], Option[String], Option[String], Option[String], Option[String], Option[String])](sql).updateMany(eventData)
+        val sql = "INSERT INTO events (event_id, timestamp, event_json, failed, app_id, event_name, platform, name_tracker, domain_userid, v_tracker) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (event_id) DO NOTHING"
+        Update[(String, Instant, Json, Boolean, Option[String], Option[String], Option[String], Option[String], Option[String], Option[String])](sql).updateMany(eventData)
       }
 
       val insertColumnsProgram = if (allColumns.nonEmpty) {
-        val sql = "INSERT OR IGNORE INTO columns (name) VALUES (?)"
+        val sql = "INSERT INTO columns (name) VALUES (?) ON CONFLICT (name) DO NOTHING"
         Update[String](sql).updateMany(allColumns)
       } else {
         ().pure[ConnectionIO]
       }
 
-      (insertEventsProgram *> insertColumnsProgram).transact(writeXa).void
+      (insertEventsProgram *> insertColumnsProgram).transact(xa).void
     } else {
       IO.unit
     }
   }
 
-  /** Add bad events - ignored in SQLite storage. */
+  /** Add bad events - ignored in PostgreSQL storage. */
   override def addToBad(events: List[BadEvent]): IO[Unit] = IO.unit
 
   /** Reset storage by deleting all events. */
   override def reset(): IO[Unit] = {
-    (sql"DELETE FROM events".update.run *> sql"DELETE FROM columns".update.run).transact(writeXa).void
+    (sql"DELETE FROM events".update.run *> sql"DELETE FROM columns".update.run).transact(xa).void
   }
 
   override def getColumns: IO[List[String]] = {
-    sql"SELECT name FROM columns ORDER BY name"
+    (sql"SELECT name FROM columns ORDER BY name COLLATE " ++ Fragment.const("\"C\""))
       .query[String]
       .to[List]
-      .transact(readXa)
+      .transact(xa)
   }
 
   override def getTimeline(request: TimelineRequest): IO[TimelineData] = {
@@ -88,59 +89,42 @@ private[micro] class SqliteStorage(readXa: Transactor[IO], writeXa: Transactor[I
       return IO.pure(TimelineData(List.empty))
     }
 
-    // Create a VALUES clause with all bucket ranges
+    // Create bucket VALUES with timestamps for index-friendly queries
     val bucketValues = request.buckets.zipWithIndex.map { case (bucket, idx) =>
-      s"(${bucket.start.toEpochMilli}, ${bucket.end.toEpochMilli}, $idx)"
+      s"(TIMESTAMP '${Timestamp.from(bucket.start)}', TIMESTAMP '${Timestamp.from(bucket.end)}', $idx)"
     }.mkString(", ")
 
-    // Split into two queries so that the timestamp + failed index can be used for each
+    // Use timestamp comparisons directly to leverage indexes
     val query = sql"""
-      WITH buckets(bucket_start, bucket_end, bucket_order) AS (
+      WITH buckets(bucket_start_ts, bucket_end_ts, bucket_order) AS (
         VALUES """ ++ Fragment.const(bucketValues) ++ sql"""
-      ),
-      valid_counts AS (
-        SELECT
-          bucket_start,
-          bucket_end,
-          bucket_order,
-          COUNT(events.rowid) as valid_count
-        FROM buckets
-        LEFT JOIN events ON events.timestamp >= buckets.bucket_start
-                        AND events.timestamp < buckets.bucket_end
-                        AND events.failed = false
-        GROUP BY bucket_start, bucket_end, bucket_order
-      ),
-      failed_counts AS (
-        SELECT
-          bucket_start,
-          bucket_end,
-          bucket_order,
-          COUNT(events.rowid) as failed_count
-        FROM buckets
-        INNER JOIN events ON events.timestamp >= buckets.bucket_start
-                        AND events.timestamp < buckets.bucket_end
-                        AND events.failed = true
-        GROUP BY bucket_start, bucket_end, bucket_order
       )
       SELECT
-        v.bucket_start,
-        v.bucket_end,
-        v.bucket_order,
-        COALESCE(v.valid_count, 0) as valid_count,
-        COALESCE(f.failed_count, 0) as failed_count
-      FROM valid_counts v
-      LEFT JOIN failed_counts f ON v.bucket_start = f.bucket_start
-                               AND v.bucket_end = f.bucket_end
-      ORDER BY v.bucket_order
+        b.bucket_order,
+        (
+            SELECT COUNT(*)
+            FROM events e
+            WHERE e.timestamp >= b.bucket_start_ts
+              AND e.timestamp < b.bucket_end_ts
+              AND e.failed = false
+        ) AS valid_count,
+        (
+            SELECT COUNT(*)
+            FROM events e
+            WHERE e.timestamp >= b.bucket_start_ts
+              AND e.timestamp < b.bucket_end_ts
+              AND e.failed = true
+        ) AS failed_count
+      FROM buckets b
+      ORDER BY b.bucket_order
     """
 
     query
-      .query[(Long, Long, Int, Int, Int)]
+      .query[(Int, Int, Int)]
       .to[List]
-      .transact(readXa)
+      .transact(xa)
       .map { results =>
-        val points = results.map { case (start, end, _, validCount, failedCount) =>
-          val bucket = TimelineBucket(Instant.ofEpochMilli(start), Instant.ofEpochMilli(end))
+        val points = results.zip(request.buckets).map { case ((_, validCount, failedCount), bucket) =>
           TimelinePoint(validCount, failedCount, bucket)
         }
         TimelineData(points)
@@ -159,12 +143,12 @@ private[micro] class SqliteStorage(readXa: Transactor[IO], writeXa: Transactor[I
           | SELECT DISTINCT value FROM (
           |   SELECT $frCol AS value FROM events
           |   ORDER BY timestamp DESC LIMIT $COLUMN_STATS_SCAN_LIMIT
-          | ) WHERE value IS NOT NULL LIMIT 20
+          | ) subquery WHERE value IS NOT NULL LIMIT 20
           |""".stripMargin
 
         query.query[String]
           .to[List]
-          .transact(readXa)
+          .transact(xa)
           .map(values => Some(values))
       } else {
         IO.pure(None)
@@ -198,7 +182,7 @@ private[micro] class SqliteStorage(readXa: Transactor[IO], writeXa: Transactor[I
       }
     ).flatten
 
-    // Only filter on indexed columns (SQLite mode doesn't support JSON column filtering)
+    // Only filter on indexed columns (PostgreSQL mode doesn't support JSON column filtering yet)
     val columnFilters = request.filters
       .filter(f => INDEXED_COLUMNS.contains(f.column))
       .filter(_.value.nonEmpty) // Skip empty filter values
@@ -210,7 +194,7 @@ private[micro] class SqliteStorage(readXa: Transactor[IO], writeXa: Transactor[I
     val allConditions = whereConditions ++ columnFilters
     val whereClause = allConditions.foldLeft(baseConditions)(_ ++ _)
 
-    // Only allow sorting on indexed columns (SQLite mode doesn't support JSON column sorting)
+    // Only allow sorting on indexed columns
     val orderByClause = request.sorting.filter { s =>
         s.column === "collector_tstamp" || INDEXED_COLUMNS.contains(s.column)
       }.fold(fr"ORDER BY timestamp DESC") { sorting =>
@@ -236,15 +220,11 @@ private[micro] class SqliteStorage(readXa: Transactor[IO], writeXa: Transactor[I
       |""".stripMargin
 
     (
-      countQuery.query[Int].unique.transact(readXa),
-      dataQuery.query[String].to[List].transact(readXa)
-    ).parTupled.flatMap { case (totalItems, jsonStrings) =>
-      jsonStrings.traverse { jsonStr =>
-        IO.fromEither(parser.parse(jsonStr))
-      }.map { events =>
-        val totalPages = Math.max(1, (totalItems + safePageSize - 1) / safePageSize)
-        EventsResponse(events, totalPages, totalItems)
-      }
+      countQuery.query[Int].unique.transact(xa),
+      dataQuery.query[Json].to[List].transact(xa)
+    ).parTupled.map { case (totalItems, events) =>
+      val totalPages = Math.max(1, (totalItems + safePageSize - 1) / safePageSize)
+      EventsResponse(events, totalPages, totalItems)
     }
   }
 
@@ -253,7 +233,7 @@ private[micro] class SqliteStorage(readXa: Transactor[IO], writeXa: Transactor[I
       now <- IO.realTimeInstant
       cutoffTime = now.minusMillis(ttl.toMillis)
       _ <- logger.info(s"Running TTL cleanup: deleting events older than $cutoffTime (TTL: $ttl)")
-      deletedCount <- sql"DELETE FROM events WHERE timestamp < $cutoffTime".update.run.transact(writeXa)
+      deletedCount <- sql"DELETE FROM events WHERE timestamp < $cutoffTime".update.run.transact(xa)
       _ <- logger.info(s"TTL cleanup completed: deleted $deletedCount events")
     } yield ()
 
@@ -263,7 +243,7 @@ private[micro] class SqliteStorage(readXa: Transactor[IO], writeXa: Transactor[I
   }
 }
 
-private[micro] object SqliteStorage {
+private[micro] object PostgresqlStorage {
   implicit val logger: Logger[IO] = Slf4jLogger.getLogger[IO]
 
   // Columns that have dedicated table columns (rather than JSON extraction)
@@ -274,35 +254,23 @@ private[micro] object SqliteStorage {
   // Tunable: increase for more coverage, decrease for better performance
   private val COLUMN_STATS_SCAN_LIMIT = 1000
 
-  /** Create SQLite storage with file-based database. */
-  def file(dbPath: String): Resource[IO, SqliteStorage] = {
-    val params = List(
-      "journal_mode=WAL",   // Write-Ahead Logging for better concurrency
-      "busy_timeout=30000", // Wait up to 30 seconds instead of immediate BUSY error
-      "synchronous=FULL",   // Maximum durability - fsync after every commit
-      "cache_size=-20000",  // 20MB cache (negative = KB)
-      "temp_store=MEMORY"   // Use memory for temporary tables
-    )
-    val url = s"jdbc:sqlite:$dbPath?${params.mkString("&")}"
+  /** Create PostgreSQL storage with database connection. */
+  def create(host: String, port: Int, database: String, user: String, password: String): Resource[IO, PostgresqlStorage] = {
+    val url = s"jdbc:postgresql://$host:$port/$database"
     for {
-      // Write transactor: single connection (SQLite only allows 1 writer anyway)
-      writeXa <- transactor(url, maxPoolSize = 1)
-
-      // Read transactor: multiple connections for concurrent reads (WAL mode supports this)
-      readXa <- transactor(url, maxPoolSize = 4)
-
-      _ <- Resource.eval(initialize(writeXa))
-    } yield new SqliteStorage(readXa, writeXa)
+      xa <- transactor(url, user, password, maxPoolSize = 8)
+      _ <- Resource.eval(initialize(xa))
+    } yield new PostgresqlStorage(xa)
   }
 
-  private def transactor(url: String, maxPoolSize: Int): Resource[IO, HikariTransactor[IO]] =
+  private def transactor(url: String, user: String, password: String, maxPoolSize: Int): Resource[IO, HikariTransactor[IO]] =
     for {
       ec <- ExecutionContexts.fixedThreadPool[IO](maxPoolSize)
       xa <- HikariTransactor.newHikariTransactor[IO](
-        driverClassName = "org.sqlite.JDBC",
+        driverClassName = "org.postgresql.Driver",
         url = url,
-        user = "",
-        pass = "",
+        user = user,
+        pass = password,
         connectEC = ec
       )
       _ <- Resource.eval(configureDataSource(xa, maxPoolSize = maxPoolSize))
@@ -311,7 +279,7 @@ private[micro] object SqliteStorage {
   private def configureDataSource(xa: HikariTransactor[IO], maxPoolSize: Int): IO[Unit] = IO {
     val config = xa.kernel.getHikariConfigMXBean
     config.setMaximumPoolSize(maxPoolSize)
-    config.setMinimumIdle(1)
+    config.setMinimumIdle(2)
     config.setConnectionTimeout(30000)  // 30 second connection timeout
     config.setIdleTimeout(600000)       // 10 minute idle timeout
   }
@@ -327,7 +295,7 @@ private[micro] object SqliteStorage {
       CREATE TABLE IF NOT EXISTS events (
         event_id TEXT PRIMARY KEY,
         timestamp TIMESTAMP NOT NULL,
-        event_json JSON NOT NULL,
+        event_json JSONB NOT NULL,
         failed BOOLEAN NOT NULL,
         app_id TEXT,
         event_name TEXT,
@@ -369,6 +337,4 @@ private[micro] object SqliteStorage {
       .void
   }
 
-  implicit val instantEpochMeta: Meta[Instant] =
-    Meta[Timestamp].timap(_.toInstant)(Timestamp.from)
 }
