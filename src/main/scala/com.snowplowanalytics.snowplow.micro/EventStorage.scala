@@ -11,9 +11,12 @@
 package com.snowplowanalytics.snowplow.micro
 
 import cats.effect.{IO, Resource}
-import com.snowplowanalytics.snowplow.micro.Configuration.StorageConfig
+import cats.implicits._
+import com.snowplowanalytics.snowplow.micro.Configuration.StorageMode
 import com.snowplowanalytics.snowplow.micro.model.ColumnStatsResponse
 import io.circe.Json
+import org.typelevel.log4cats.Logger
+import org.typelevel.log4cats.slf4j.Slf4jLogger
 
 import scala.collection.mutable
 
@@ -41,16 +44,21 @@ object NoStorage extends EventStorage {
 }
 
 object EventStorage {
-  def create(config: StorageConfig): Resource[IO, EventStorage] = {
+  implicit val logger: Logger[IO] = Slf4jLogger.getLogger[IO]
+
+  def create(config: StorageMode): Resource[IO, EventStorage] = {
     config match {
-      case StorageConfig.None =>
+      case StorageMode.None =>
+        Resource.eval(logger.info("Not storing any events")) *>
         Resource.pure(NoStorage)
-      case StorageConfig.Persistent(path, ttl, cleanupInterval) =>
-        for {
-          storage <- SqliteStorage.file(path.toString)
+      case StorageMode.Persistent(host, port, database, user, password, ttl, cleanupInterval) =>
+        Resource.eval(logger.info(s"Storing events in PostgreSQL at $host:$port/$database")) *>
+        (for {
+          storage <- PostgresqlStorage.create(host, port, database, user, password)
           _ <- storage.scheduleCleanup(ttl, cleanupInterval)
-        } yield storage
-      case StorageConfig.InMemory =>
+        } yield storage)
+      case StorageMode.InMemory =>
+        Resource.eval(logger.info("Storing events in memory")) *>
         Resource.pure(new InMemoryStorage())
     }
   }
