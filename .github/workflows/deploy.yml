@@ -103,7 +103,7 @@ jobs:
       with:
         images: snowplow/snowplow-micro
         tags: |
-          type=raw,value=latest-distroless,enable=${{ !contains(steps.ver.outputs.MICRO_VERSION, 'rc') }}
+          type=raw,value=latest-distroless,enable=${{ !contains(steps.version.outputs.MICRO_VERSION, 'rc') }}
           type=raw,value=${{ steps.version.outputs.MICRO_VERSION }}-distroless
         flavor: |
           latest=false
