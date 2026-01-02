@@ -10,7 +10,7 @@
 
 package com.snowplowanalytics.snowplow.micro
 
-import cats.data.EitherT
+import cats.data.{EitherT, ValidatedNel}
 import cats.effect.IO
 import cats.implicits._
 import com.monovore.decline.{Argument, Opts}
@@ -24,10 +24,11 @@ import com.snowplowanalytics.snowplow.collector.core.{Config => CollectorConfig}
 import com.snowplowanalytics.snowplow.enrich.common.adapters.{CallrailSchemas, CloudfrontAccessLogSchemas, GoogleAnalyticsSchemas, HubspotSchemas, MailchimpSchemas, MailgunSchemas, MandrillSchemas, MarketoSchemas, OlarkSchemas, PagerdutySchemas, PingdomSchemas, SendgridSchemas, StatusGatorSchemas, UnbounceSchemas, UrbanAirshipSchemas, VeroSchemas, AdaptersSchemas => EnrichAdaptersSchemas}
 import com.snowplowanalytics.snowplow.enrich.common.enrichments.{AtomicFields, EnrichmentRegistry}
 import com.snowplowanalytics.snowplow.enrich.common.enrichments.registry.EnrichmentConf
-import com.typesafe.config.{ConfigFactory, ConfigParseOptions, ConfigValueFactory, Config => TypesafeConfig}
+import com.typesafe.config.{ConfigFactory, ConfigParseOptions, Config => TypesafeConfig}
 import fs2.io.file.{Files, Path => FS2Path}
 import io.circe.config.syntax.CirceConfigOps
 import io.circe.generic.semiauto.deriveDecoder
+import io.circe.config.syntax._
 import io.circe.syntax.EncoderOps
 import io.circe.{Decoder, Json, JsonObject}
 import org.http4s.Uri
@@ -36,7 +37,7 @@ import org.typelevel.log4cats.slf4j.Slf4jLogger
 
 import java.net.URI
 import java.nio.file.{Path, Paths}
-import scala.concurrent.duration.{Duration, DurationInt, FiniteDuration}
+import scala.concurrent.duration.FiniteDuration
 
 object Configuration {
 
@@ -47,11 +48,17 @@ object Configuration {
     case object Json extends OutputFormat
   }
 
-  sealed trait StorageConfig
-  object StorageConfig {
-    case object None extends StorageConfig
-    case object InMemory extends StorageConfig
-    case class Persistent(path: Path, ttl: FiniteDuration, cleanupInterval: FiniteDuration) extends StorageConfig
+  sealed trait StorageMode
+  object StorageMode {
+    case object None extends StorageMode
+    case object InMemory extends StorageMode
+    case class Persistent(host: String,
+                          port: Int,
+                          database: String,
+                          user: String,
+                          password: String,
+                          ttl: FiniteDuration,
+                          cleanupInterval: FiniteDuration) extends StorageMode
   }
 
   object Cli {
@@ -59,20 +66,12 @@ object Configuration {
       Uri.fromString(str).leftMap(_ => s"Invalid URI: $str").toValidatedNel
     }
 
-    implicit val durationArgument: Argument[FiniteDuration] = Argument.from("duration") { str =>
-      Either.catchNonFatal {
-        val d = ConfigValueFactory.fromAnyRef(str).atKey("d").getDuration("d")
-        Duration.fromNanos(d.toNanos)
-      }.leftMap(_ => s"Invalid duration format: $str. Use HOCON format (e.g., 1h, 30m, 7d)")
-        .toValidatedNel
-    }
-
     final case class Config(collector: Option[Path],
                             iglu: Option[Path],
                             outputFormat: OutputFormat,
                             destination: Option[Uri],
                             yauaa: Boolean,
-                            storage: StorageConfig,
+                            storage: StorageMode,
                             auth: Option[Path])
 
     private val collector = Opts.option[Path]("collector-config", "Configuration file for Collector", "c", "config.hocon").orNone
@@ -81,11 +80,7 @@ object Configuration {
     private val outputJson = Opts.flag("output-json", "Output events in JSON format to standard output or HTTP destination (with a separate key for each schema)", "j").orFalse
     private val destination = Opts.option[Uri]("destination", "HTTP(s) URL to send output data to (requires --output-json or --output-tsv)", "d").orNone
     private val noStorage = Opts.flag("no-storage", "Do not store events anywhere, and disable the API (handy if using Micro purely for output)").orFalse
-    private val storagePath = Opts.option[Path]("storage-file", "Path to an SQLite database file for persistent storage", "s").orNone
-    private val storageTtl = Opts.option[FiniteDuration]("storage-ttl", "Time-to-live for events in persistent storage (e.g. 1h, 1d; default: 7d)")
-      .withDefault(7.days)
-    private val storageCleanupInterval = Opts.option[FiniteDuration]("storage-cleanup-interval", "Interval for cleanup of expired events in persistent storage (e.g. 1h, 1d; default: 1h)")
-      .withDefault(1.hour)
+    private val storage = Opts.option[Path]("storage", "Configuration file for PostgreSQL storage", "s", "storage.hocon").orNone
     private val yauaa = Opts.flag("yauaa", "Enable YAUAA user agent enrichment").orFalse
     private val auth = Opts.option[Path]("auth", "Configuration file for authentication", "a", "auth.hocon").orNone
 
@@ -99,22 +94,18 @@ object Configuration {
         case (true, true, _) => "Cannot specify both --output-tsv and --output-json".invalidNel[(OutputFormat, Option[Uri])]
       }
 
-    private val storage = (noStorage, storagePath, storageTtl, storageCleanupInterval)
-      .mapN { (_, _, _, _) }
+    private val storageConfig = (noStorage, storage)
+      .mapN { (_, _) }
       .mapValidated {
-        case (true, _, _, _) =>
-          StorageConfig.None.validNel[String]
-        case (_, _, ttl, _) if ttl.toMinutes < 5 =>
-          "--storage-ttl must be at least 5 minutes (5m)".invalidNel[StorageConfig]
-        case (_, _, _, cleanupInterval) if cleanupInterval.toMinutes < 1 =>
-          "--storage-cleanup-interval must be at least 1 minute (1m)".invalidNel[StorageConfig]
-        case (_, None, _, _) =>
-          StorageConfig.InMemory.validNel[String]
-        case (_, Some(path), ttl, cleanupInterval) =>
-          StorageConfig.Persistent(path, ttl, cleanupInterval).validNel[String]
+        case (true, _) =>
+          StorageMode.None.validNel[String]
+        case (_, None) =>
+          StorageMode.InMemory.validNel[String]
+        case (_, Some(path)) =>
+          parseStorageConfig(path)
       }
 
-    val config: Opts[Config] = (collector, iglu, output, yauaa, storage, auth).mapN {
+    val config: Opts[Config] = (collector, iglu, output, yauaa, storageConfig, auth).mapN {
       case (c, i, (f, d), y, s, a) => Config(c, i, f, d, y, s, a)
     }
   }
@@ -126,6 +117,7 @@ object Configuration {
     val sslCertificatePassword = "MICRO_SSL_CERT_PASSWORD"
     val azureBlobAccount = "MICRO_AZURE_BLOB_ACCOUNT"
     val azureBlobSasToken = "MICRO_AZURE_BLOB_SAS_TOKEN"
+    val postgresqlPassword = "MICRO_POSTGRESQL_PASSWORD"
   }
 
   final case class DummySinkConfig()
@@ -139,13 +131,20 @@ object Configuration {
                               organizationId: String,
                               clientId: String)
 
+  final case class StorageConfig(host: String,
+                                port: Int,
+                                database: String,
+                                user: String,
+                                ttl: FiniteDuration,
+                                cleanupInterval: FiniteDuration)
+
   final case class MicroConfig(collector: CollectorConfig[SinkConfig],
                                iglu: IgluResources,
                                enrichmentsConfig: List[EnrichmentConf],
                                enrichConfig: EnrichConfig,
                                outputFormat: OutputFormat,
                                destination: Option[Uri],
-                               storage: StorageConfig,
+                               storage: StorageMode,
                                auth: Option[AuthConfig])
 
   final case class EnrichValidation(atomicFieldsLimits: AtomicFields)
@@ -158,6 +157,40 @@ object Configuration {
   final case class IgluResources(resolver: Resolver[IO], client: IgluCirceClient[IO])
 
   implicit private def logger: Logger[IO] = Slf4jLogger.getLogger[IO]
+
+  private def parseStorageConfig(path: Path): ValidatedNel[String, StorageMode] = {
+    try {
+      val config = ConfigFactory.parseFile(path.toFile)
+      config.as[StorageConfig] match {
+        case Right(storageConfig) =>
+          sys.env.get(EnvironmentVariables.postgresqlPassword) match {
+            case Some(password) =>
+              if (storageConfig.ttl.toMinutes < 5) {
+                "Storage TTL must be at least 5 minutes (5m)".invalidNel[StorageMode]
+              } else if (storageConfig.cleanupInterval.toMinutes < 1) {
+                "Storage cleanup interval must be at least 1 minute (1m)".invalidNel[StorageMode]
+              } else {
+                StorageMode.Persistent(
+                  storageConfig.host,
+                  storageConfig.port,
+                  storageConfig.database,
+                  storageConfig.user,
+                  password,
+                  storageConfig.ttl,
+                  storageConfig.cleanupInterval
+                ).validNel[String]
+              }
+            case None =>
+              s"PostgreSQL password not found in environment variable ${EnvironmentVariables.postgresqlPassword}".invalidNel[StorageMode]
+          }
+        case Left(error) =>
+          s"Failed to parse storage configuration: ${error.show}".invalidNel[StorageMode]
+      }
+    } catch {
+      case e: Exception =>
+        s"Failed to read storage configuration file: ${e.getMessage}".invalidNel[StorageMode]
+    }
+  }
 
   def load(): Opts[EitherT[IO, String, MicroConfig]] = {
     Cli.config.map { cliConfig =>
@@ -407,4 +440,6 @@ object Configuration {
   }
 
   implicit val authConfigDecoder: Decoder[AuthConfig] = deriveDecoder[AuthConfig]
+
+  implicit val storageConfigDecoder: Decoder[StorageConfig] = deriveDecoder[StorageConfig]
 }

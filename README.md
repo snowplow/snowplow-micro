@@ -32,8 +32,26 @@ sbt +publishLocal && cd ..
 
 To run the tests:
 
+**Prerequisites**: PostgreSQL tests require a local PostgreSQL instance. Start one with Docker:
+
+```bash
+docker run --name micro-postgres-test \
+  -e POSTGRES_PASSWORD=test_password \
+  -e POSTGRES_USER=test_user \
+  -e POSTGRES_DB=micro_test \
+  -p 5432:5432 \
+  -d postgres:15
 ```
+
+Then run the tests:
+
+```bash
 sbt test
+```
+
+To stop the test database:
+```bash
+docker stop micro-postgres-test && docker rm micro-postgres-test
 ```
 
 To build a Docker image for local testing:
