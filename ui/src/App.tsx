@@ -38,7 +38,8 @@ function App() {
     totalItems: 0,
   })
   const [currentPage, setCurrentPage] = useState(1)
-  const [timelineData, setTimelineData] = useState<TimelineData>({ points: [] })
+  const [minutesTimelineData, setMinutesTimelineData] = useState<TimelineData>({ points: [] })
+  const [daysTimelineData, setDaysTimelineData] = useState<TimelineData>({ points: [] })
   const [availableColumnNames, setAvailableColumnNames] = useState<string[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [isRefreshing, setIsRefreshing] = useState(false)
@@ -50,7 +51,7 @@ function App() {
     title: string
   } | null>(null)
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([])
-  const [selectedMinute, setSelectedMinute] = useState<string | null>(null)
+  const [selectedTimeBucket, setSelectedTimeBucket] = useState<string | null>(null)
   const [lastRefreshTime, setLastRefreshTime] = useState<Date | null>(null)
   const [showActionsMenu, setShowActionsMenu] = useState(false)
   const [columnStats, setColumnStats] = useState<Record<string, ColumnStats>>(
@@ -127,23 +128,22 @@ function App() {
 
     let timeRange
     if (isRefresh) {
-      // only filter by selected minute, or not at all
-      timeRange = selectedMinute
+      // only filter by selected bucket, or not at all
+      timeRange = selectedTimeBucket
         ? {
-            start: new Date(selectedMinute).getTime(),
-            end: new Date(selectedMinute).getTime() + 60000,
+            start: Number(selectedTimeBucket.split('-')[0]),
+            end: Number(selectedTimeBucket.split('-')[1]),
           }
         : undefined
     } else {
       // add a (non-inclusive) upper bound to avoid getting newer events in the results
       const refreshTimeLimit = lastRefreshTime?.getTime()
-      if (selectedMinute && refreshTimeLimit) {
+      if (selectedTimeBucket && refreshTimeLimit) {
+        const bucketStart = Number(selectedTimeBucket.split('-')[0])
+        const bucketEnd = Number(selectedTimeBucket.split('-')[1])
         timeRange = {
-          start: new Date(selectedMinute).getTime(),
-          end: Math.min(
-            new Date(selectedMinute).getTime() + 60000,
-            refreshTimeLimit
-          ),
+          start: bucketStart,
+          end: Math.min(bucketEnd, refreshTimeLimit),
         }
       } else if (refreshTimeLimit) {
         timeRange = { end: refreshTimeLimit }
@@ -198,13 +198,16 @@ function App() {
         fetchedColumnStats,
       ] = await Promise.all([
         EventsApiService.fetchFilteredEvents(request, token),
-        EventsApiService.fetchTimeline(token),
+        EventsApiService.fetchTimeline(EventsApiService.generateCombinedTimeline(), token),
         EventsApiService.fetchColumns(token),
         EventsApiService.fetchColumnStats(selectedColumnNames, token),
       ])
 
+      const { minutes, days } = EventsApiService.splitTimelineResponse(fetchedTimeline)
+
       setEventData(fetchedEventData)
-      setTimelineData(fetchedTimeline)
+      setMinutesTimelineData(minutes)
+      setDaysTimelineData(days)
       setAvailableColumnNames(fetchedColumns)
       setColumnStats(fetchedColumnStats)
       setLastRefreshTime(new Date())
@@ -226,9 +229,10 @@ function App() {
       const token = await getAccessToken()
       await EventsApiService.resetEvents(token)
       setEventData({ events: [], totalPages: 0, totalItems: 0 })
-      setTimelineData({ points: [] })
+      setMinutesTimelineData({ points: [] })
+      setDaysTimelineData({ points: [] })
       setAvailableColumnNames([])
-      setSelectedMinute(null)
+      setSelectedTimeBucket(null)
       setCurrentPage(1)
       setLastRefreshTime(null)
     } catch (err) {
@@ -282,11 +286,11 @@ function App() {
   }
 
   // Check if any filters are active
-  const hasActiveFilters = selectedMinute !== null || columnFilters.length > 0
+  const hasActiveFilters = selectedTimeBucket !== null || columnFilters.length > 0
 
   // Reset all filters
   const resetAllFilters = () => {
-    setSelectedMinute(null)
+    setSelectedTimeBucket(null)
     setColumnFilters([])
   }
 
@@ -294,9 +298,12 @@ function App() {
   const getActiveFilters = () => {
     const filters: string[] = []
 
-    if (selectedMinute) {
-      const date = new Date(selectedMinute)
-      filters.push(`Time: ${date.toLocaleTimeString()}`)
+    if (selectedTimeBucket) {
+      const bucketStart = Number(selectedTimeBucket.split('-')[0])
+      const bucketEnd = Number(selectedTimeBucket.split('-')[1])
+      const startDate = new Date(bucketStart)
+      const endDate = new Date(bucketEnd)
+      filters.push(`Time: ${startDate.toLocaleString()} – ${endDate.toLocaleString()}`)
     }
 
     if (columnFilters.length > 0) {
@@ -317,7 +324,7 @@ function App() {
     }, 400)
 
     return () => clearTimeout(timeoutId)
-  }, [columnFilters, selectedMinute, currentPage, sorting, isAuthenticated])
+  }, [columnFilters, selectedTimeBucket, currentPage, sorting, isAuthenticated])
 
   // Initial load - only when authentication is ready
   useEffect(() => {
@@ -462,12 +469,33 @@ function App() {
       <div className="flex flex-1 overflow-hidden">
         {/* Main Content */}
         <div className="h-full p-4 min-w-0 flex flex-1 flex-col gap-4">
-          {/* Events Chart */}
-          <EventsChart
-            timelineData={timelineData}
-            selectedMinute={selectedMinute}
-            onMinuteClick={setSelectedMinute}
-          />
+          {/* Timeline Charts */}
+          <div className="flex gap-4">
+            <div className="flex-1">
+              <EventsChart
+                timelineData={daysTimelineData}
+                selectedBucket={selectedTimeBucket}
+                onBucketClick={setSelectedTimeBucket}
+                timeFormat={(date) => date.toLocaleDateString('en-US', {
+                  month: 'short',
+                  day: 'numeric',
+                  hour: '2-digit'
+                })}
+              />
+            </div>
+            <div className="flex-1">
+              <EventsChart
+                timelineData={minutesTimelineData}
+                selectedBucket={selectedTimeBucket}
+                onBucketClick={setSelectedTimeBucket}
+                timeFormat={(date) => date.toLocaleTimeString('en-US', {
+                  hour12: false,
+                  hour: '2-digit',
+                  minute: '2-digit',
+                })}
+              />
+            </div>
+          </div>
 
           {/* Data Table */}
           <div className="flex-1 min-h-0">
@@ -477,7 +505,7 @@ function App() {
               selectedCellId={selectedCellId}
               columnFilters={columnFilters}
               setColumnFilters={setColumnFilters}
-              selectedMinute={selectedMinute}
+              selectedTimeBucket={selectedTimeBucket}
               onJsonCellToggle={toggleJsonPanel}
               onReorderColumns={reorderColumns}
               onRowClick={handleRowClick}

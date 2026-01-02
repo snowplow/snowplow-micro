@@ -55,8 +55,10 @@ sealed trait MicroRoutes[S <: EventStorage] extends Http4sDsl[IO] {
       request.as[ColumnStatsRequest].flatMap { req =>
         storage.getColumnStats(req.columns).flatMap(stats => Ok(stats))
       }
-    case GET -> Root / "micro" / "timeline" =>
-      storage.getTimeline.flatMap(timeline => Ok(timeline))
+    case request @ POST -> Root / "micro" / "timeline" =>
+      request.as[TimelineRequest].flatMap { req =>
+        storage.getTimeline(req).flatMap(timeline => Ok(timeline))
+      }
     case GET -> Root / "micro" / "iglu" / vendor / name / "jsonschema" / versionVar =>
       lookupSchema(vendor, name, versionVar)
   }
@@ -205,6 +207,7 @@ object Routing {
   implicit val e: Encoder[Event] = deriveEncoder
   implicit val be: Encoder[BadEvent] = deriveEncoder
   implicit val re: Encoder[ResolutionError] = deriveEncoder
+  implicit val tb: Encoder[TimelineBucket] = deriveEncoder
   implicit val tp: Encoder[TimelinePoint] = deriveEncoder
   implicit val td: Encoder[TimelineData] = deriveEncoder
   implicit val cs: Encoder[ColumnStats] = deriveEncoder
@@ -217,6 +220,8 @@ object Routing {
   implicit val fg: Decoder[FiltersGood] = deriveDecoder
   implicit val fb: Decoder[FiltersBad] = deriveDecoder
   implicit val csr: Decoder[ColumnStatsRequest] = deriveDecoder
+  implicit val tbd: Decoder[TimelineBucket] = deriveDecoder
+  implicit val trd1: Decoder[TimelineRequest] = deriveDecoder
   implicit val efd: Decoder[EventsFilter] = deriveDecoder
   implicit val trd: Decoder[TimeRange] = deriveDecoder
   implicit val esd: Decoder[EventsSorting] = deriveDecoder
