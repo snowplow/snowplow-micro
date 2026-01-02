@@ -4,8 +4,8 @@ export type Event = {
 }
 
 export type TimelineBucket = {
-  start: number
-  end: number
+  start: string  // ISO string
+  end: string    // ISO string
 }
 
 export type TimelineRequest = {
@@ -40,8 +40,8 @@ export type EventsFilter = {
 }
 
 export type TimeRange = {
-  start?: number
-  end?: number
+  start?: string  // ISO string
+  end?: string    // ISO string
 }
 
 export type EventsSorting = {
@@ -205,8 +205,8 @@ export class EventsApiService {
       const bucketStart = alignedTime - i * bucketSizeMs
       const bucketEnd = bucketStart + bucketSizeMs
       buckets.push({
-        start: bucketStart,
-        end: bucketEnd
+        start: new Date(bucketStart).toISOString(),
+        end: new Date(bucketEnd).toISOString()
       })
     }
 

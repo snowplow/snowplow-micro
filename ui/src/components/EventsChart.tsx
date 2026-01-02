@@ -50,7 +50,7 @@ export function EventsChart({
       // Check if we actually have events at this time point
       if (data.validEvents > 0 || data.failedEvents > 0) {
         // Clicking on a bar with actual data - toggle selection
-        const bucketKey = `${data.bucketStart}-${data.bucketEnd}`
+        const bucketKey = `${data.bucketStart}|${data.bucketEnd}`
         onBucketClick(selectedBucket === bucketKey ? null : bucketKey)
       } else {
         // Clicking on empty area (no events at this time) - reset selection
@@ -64,7 +64,7 @@ export function EventsChart({
 
   const getBarOpacity = (index: number): number => {
     const data = chartData[index]
-    const bucketKey = `${data.bucketStart}-${data.bucketEnd}`
+    const bucketKey = `${data.bucketStart}|${data.bucketEnd}`
     if (selectedBucket === bucketKey) return 1.0
     if (selectedBucket && selectedBucket !== bucketKey) return 0.2
     return 0.8

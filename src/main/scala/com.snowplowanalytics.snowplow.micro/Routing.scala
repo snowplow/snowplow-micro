@@ -188,12 +188,6 @@ object Routing {
   implicit val dateTimeEncoder: Encoder[DateTime] =
     Encoder[String].contramap(_.toString)
 
-  implicit val instantEncoder: Encoder[Instant] =
-    Encoder[Long].contramap(_.toEpochMilli)
-
-  implicit val instantDecoder: Decoder[Instant] =
-    Decoder[Long].map(Instant.ofEpochMilli)
-
   implicit val nameValuePairEncoder: Encoder[NameValuePair] =
     Encoder[String].contramap(kv => s"${kv.getName}=${kv.getValue}")
 
