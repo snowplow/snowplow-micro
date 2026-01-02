@@ -131,22 +131,22 @@ function App() {
       // only filter by selected bucket, or not at all
       timeRange = selectedTimeBucket
         ? {
-            start: Number(selectedTimeBucket.split('-')[0]),
-            end: Number(selectedTimeBucket.split('-')[1]),
+            start: selectedTimeBucket.split('|')[0],
+            end: selectedTimeBucket.split('|')[1],
           }
         : undefined
     } else {
       // add a (non-inclusive) upper bound to avoid getting newer events in the results
-      const refreshTimeLimit = lastRefreshTime?.getTime()
-      if (selectedTimeBucket && refreshTimeLimit) {
-        const bucketStart = Number(selectedTimeBucket.split('-')[0])
-        const bucketEnd = Number(selectedTimeBucket.split('-')[1])
+      if (selectedTimeBucket && lastRefreshTime) {
+        const bucketStart = selectedTimeBucket.split('|')[0]
+        const bucketEnd = selectedTimeBucket.split('|')[1]
+        const bucketEndTime = new Date(bucketEnd)
         timeRange = {
           start: bucketStart,
-          end: Math.min(bucketEnd, refreshTimeLimit),
+          end: bucketEndTime < lastRefreshTime ? bucketEnd : lastRefreshTime.toISOString(),
         }
-      } else if (refreshTimeLimit) {
-        timeRange = { end: refreshTimeLimit }
+      } else if (lastRefreshTime) {
+        timeRange = { end: lastRefreshTime.toISOString() }
       }
     }
 
@@ -299,8 +299,8 @@ function App() {
     const filters: string[] = []
 
     if (selectedTimeBucket) {
-      const bucketStart = Number(selectedTimeBucket.split('-')[0])
-      const bucketEnd = Number(selectedTimeBucket.split('-')[1])
+      const bucketStart = selectedTimeBucket.split('|')[0]
+      const bucketEnd = selectedTimeBucket.split('|')[1]
       const startDate = new Date(bucketStart)
       const endDate = new Date(bucketEnd)
       filters.push(`Time: ${startDate.toLocaleString()} – ${endDate.toLocaleString()}`)
