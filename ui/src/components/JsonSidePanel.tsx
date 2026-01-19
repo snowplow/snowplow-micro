@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button'
 import { JsonViewer } from '@/components/JsonViewer'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { TruncatedColumnName } from '@/components/TruncatedColumnName'
+import { CopyButton } from '@/components/CopyButton'
 import { createColumnMetadata } from '@/utils/column-metadata'
 
 const STORAGE_KEY = 'snowplow-micro-json-panel-width'
@@ -110,11 +111,14 @@ export function JsonSidePanel({
         {/* Header with title and close button */}
         <div className="bg-background">
           <div className="flex items-center justify-between">
-            <TruncatedColumnName
-              columnMetadata={createColumnMetadata(title)}
-              iconSize="md"
-              className="text-lg font-light truncate"
-            />
+            <div className="flex items-center gap-2">
+              <TruncatedColumnName
+                columnMetadata={createColumnMetadata(title)}
+                iconSize="md"
+                className="text-lg font-light truncate"
+              />
+              <CopyButton value={value} alwaysVisible />
+            </div>
             <Button
               variant="ghost"
               size="sm"
