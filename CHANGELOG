@@ -1,3 +1,12 @@
+Version 4.0.0 (2026-01-30)
+--------------------------
+Integrate with Snowplow Console SSO (#176)
+Move UI filters, sorting and pagination to the backend (#178)
+Add PostgreSQL persistent storage (#177, #183)
+Support cloud storage blob URLs (#179)
+Add 7-day timeline view alongside existing 30-minute timeline (#181)
+Add a more prominent button to copy JSON (#186)
+
 Version 3.0.1 (2025-10-08)
 --------------------------
 Add --yauaa command line flag to enable YAUAA enrichment (#170)
