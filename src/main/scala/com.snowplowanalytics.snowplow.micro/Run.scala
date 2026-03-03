@@ -58,7 +58,7 @@ object Run {
       httpClient <- EmberClientBuilder.default[IO].build
       sqlEC <- SqlExecutionContext.mk[IO]
       assetStateRef <- Resource.eval(AssetRefresher.initialDownload(config.enrichmentsConfig))
-      registryResource = enrichmentRegistryResource(config.enrichmentsConfig, httpClient, sqlEC)
+      registryResource = enrichmentRegistryResource(config.enrichmentsConfig, httpClient, sqlEC, config.enrichConfig.jsAllowedJavaClasses)
       registryColdswap <- Coldswap.make(registryResource)
       _ <- Resource.eval(registryColdswap.opened.use_)
       badProcessor = Processor(BuildInfo.name, BuildInfo.version)
@@ -116,13 +116,11 @@ object Run {
     }
   }
 
-  // TODO: Make this configurable
-  val jsAllowedJavaClasses = Set.empty[String]
-
   private def enrichmentRegistryResource(
     configs: List[EnrichmentConf],
     httpClient: Client[IO],
-    sqlEC: ExecutionContext
+    sqlEC: ExecutionContext,
+    jsAllowedJavaClasses: Set[String]
   ): Resource[IO, EnrichmentRegistry[IO]] = {
     val enrichHttpClient = HttpClient.fromHttp4sClient[IO](httpClient)
     for {
