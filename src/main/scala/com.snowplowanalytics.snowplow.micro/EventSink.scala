@@ -166,7 +166,11 @@ final class EventSink(igluClient: IgluCirceClient[IO],
             case OptionIor.Right(enriched) =>
               validateToGoodEvent(enriched).fold(br => OptionIor.Left(badResult(List(br))), OptionIor.Right(_))
             case OptionIor.Both(badRow1, enriched) =>
-              validateToGoodEvent(enriched).fold(br => OptionIor.Left(badResult(List(badRow1, br))), OptionIor.Right(_))
+              validateToGoodEvent(enriched)
+                .fold(
+                  br => OptionIor.Left(badResult(List(badRow1, br))),
+                  ve => OptionIor.Both(badResult(List(badRow1)), ve)
+                )
             case OptionIor.None =>
               OptionIor.None
           }
