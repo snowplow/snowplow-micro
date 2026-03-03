@@ -74,6 +74,9 @@ object Settings {
         case dependency @ Library(module, _, _, _)
           if module.jarName.startsWith("snowplow-stream-collector") =>
           s"collector-${dependency.target}"
+        case dependency @ Library(module, _, _, _)
+          if module.jarName.startsWith("runtime-common") =>
+          s"runtime-${dependency.target}"
         case dependency => dependency.target
       }
       case x => MergeStrategy.first
