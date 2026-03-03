@@ -21,7 +21,7 @@ import com.snowplowanalytics.snowplow.collector.core._
 import com.snowplowanalytics.snowplow.collector.core.Sinks
 import com.snowplowanalytics.snowplow.collector.thrift.CollectorPayload
 import com.snowplowanalytics.snowplow.enrich.common.enrichments.EnrichmentRegistry
-import com.snowplowanalytics.snowplow.enrich.common.enrichments.registry.{Enrichment, EnrichmentConf, IpLookupExecutionContext}
+import com.snowplowanalytics.snowplow.enrich.common.enrichments.registry.EnrichmentConf
 import com.snowplowanalytics.snowplow.enrich.common.enrichments.registry.sqlquery.SqlExecutionContext
 import com.snowplowanalytics.snowplow.enrich.common.utils.HttpClient
 import com.snowplowanalytics.snowplow.micro.Configuration.MicroConfig
@@ -56,10 +56,9 @@ object Run {
     for {
       sslContext <- Resource.eval(setupSSLContext())
       httpClient <- EmberClientBuilder.default[IO].build
-      ipLookupEC <- IpLookupExecutionContext.mk[IO]
       sqlEC <- SqlExecutionContext.mk[IO]
       assetStateRef <- Resource.eval(AssetRefresher.initialDownload(config.enrichmentsConfig))
-      registryResource = enrichmentRegistryResource(config.enrichmentsConfig, httpClient, ipLookupEC, sqlEC)
+      registryResource = enrichmentRegistryResource(config.enrichmentsConfig, httpClient, sqlEC)
       registryColdswap <- Coldswap.make(registryResource)
       _ <- Resource.eval(registryColdswap.opened.use_)
       badProcessor = Processor(BuildInfo.name, BuildInfo.version)
@@ -117,20 +116,22 @@ object Run {
     }
   }
 
+  // TODO: Make this configurable
+  val jsAllowedJavaClasses = Set.empty[String]
+
   private def enrichmentRegistryResource(
     configs: List[EnrichmentConf],
     httpClient: Client[IO],
-    ipLookupEC: ExecutionContext,
     sqlEC: ExecutionContext
   ): Resource[IO, EnrichmentRegistry[IO]] = {
     val enrichHttpClient = HttpClient.fromHttp4sClient[IO](httpClient)
     for {
-      enrichmentRegistry <- Resource.eval(EnrichmentRegistry.build[IO](configs, enrichHttpClient, ipLookupEC, sqlEC, false)
+      enrichmentRegistry <- Resource.eval(EnrichmentRegistry.build[IO](configs, enrichHttpClient, sqlEC, false, jsAllowedJavaClasses)
         .leftMap(error => new IllegalArgumentException(s"can't build EnrichmentRegistry: $error"))
         .value.rethrow)
       _ <- Resource.eval {
         val loadedEnrichments = enrichmentRegistry.productIterator.toList.collect {
-          case Some(e: Enrichment) => e.getClass.getSimpleName
+          case Some(e) => e.getClass.getSimpleName
         }
         if (loadedEnrichments.nonEmpty) {
           logger.info(s"Enabled enrichments: ${loadedEnrichments.mkString(", ")}")
