@@ -37,13 +37,16 @@ object Dependencies {
     val azureStorageBlob = "12.25.1"
     val azureIdentity    = "1.13.3"
 
+    val snowplowRuntime = "0.20.0-M2"
+
     // force versions of transitive dependencies
     val badRows   = "2.2.0"
   }
 
-  val snowplowStreamCollector = "com.snowplowanalytics" %% "snowplow-stream-collector-http4s-core" % V.snowplowStreamCollector 
+  val snowplowStreamCollector = "com.snowplowanalytics" %% "snowplow-stream-collector-http4s-core" % V.snowplowStreamCollector
   val snowplowCommonEnrich    = "com.snowplowanalytics" %% "snowplow-common-enrich"                % V.snowplowCommonEnrich
   val snowplowAnalyticsSdk    = "com.snowplowanalytics" %% "snowplow-scala-analytics-sdk"          % V.snowplowAnalyticsSdk
+  val snowplowRuntime         = "com.snowplowanalytics" %% "runtime-common"                        % V.snowplowRuntime
   
   val http4sCirce  = "org.http4s"    %% "http4s-circe"        % V.http4sCirce
   val http4sClient = "org.http4s"    %% "http4s-ember-client" % V.http4sCirce

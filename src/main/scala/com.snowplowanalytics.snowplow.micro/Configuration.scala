@@ -34,7 +34,6 @@ import io.circe.{Decoder, Json, JsonObject}
 import org.http4s.Uri
 import org.typelevel.log4cats.Logger
 import org.typelevel.log4cats.slf4j.Slf4jLogger
-
 import java.net.URI
 import java.nio.file.{Path, Paths}
 import scala.concurrent.duration.FiniteDuration
@@ -66,7 +65,7 @@ object Configuration {
       Uri.fromString(str).leftMap(_ => s"Invalid URI: $str").toValidatedNel
     }
 
-    final case class Config(collector: Option[Path],
+    final case class Config(collectorAndEnrich: Option[Path],
                             iglu: Option[Path],
                             outputFormat: OutputFormat,
                             destination: Option[Uri],
@@ -74,7 +73,10 @@ object Configuration {
                             storage: StorageMode,
                             auth: Option[Path])
 
-    private val collector = Opts.option[Path]("collector-config", "Configuration file for Collector", "c", "config.hocon").orNone
+    private val collectorAndEnrich = (
+      Opts.option[Path]("collector-config", "Configuration file for Collector (alias for --config)", metavar = "config.hocon") orElse
+      Opts.option[Path]("config", "Configuration file for Collector and Enrich", "c", "config.hocon")
+    ).orNone
     private val iglu = Opts.option[Path]("iglu", "Configuration file for Iglu Client", "i", "iglu.json").orNone
     private val outputTsv = Opts.flag("output-tsv", "Output events in TSV format to standard output or HTTP destination", "t").orFalse
     private val outputJson = Opts.flag("output-json", "Output events in JSON format to standard output or HTTP destination (with a separate key for each schema)", "j").orFalse
@@ -105,7 +107,7 @@ object Configuration {
           parseStorageConfig(path)
       }
 
-    val config: Opts[Config] = (collector, iglu, output, yauaa, storageConfig, auth).mapN {
+    val config: Opts[Config] = (collectorAndEnrich, iglu, output, yauaa, storageConfig, auth).mapN {
       case (c, i, (f, d), y, s, a) => Config(c, i, f, d, y, s, a)
     }
   }
@@ -151,7 +153,8 @@ object Configuration {
   final case class EnrichConfig(
     adaptersSchemas: EnrichAdaptersSchemas,
     maxJsonDepth: Int,
-    validation: EnrichValidation
+    validation: EnrichValidation,
+    assetsUpdatePeriod: FiniteDuration
   )
 
   final case class IgluResources(resolver: Resolver[IO], client: IgluCirceClient[IO])
@@ -195,8 +198,8 @@ object Configuration {
   def load(): Opts[EitherT[IO, String, MicroConfig]] = {
     Cli.config.map { cliConfig =>
       for {
-        collectorConfig <- loadCollectorConfig(cliConfig.collector)
-        enrichConfig <- loadEnrichConfig()
+        collectorConfig <- loadCollectorConfig(cliConfig.collectorAndEnrich)
+        enrichConfig <- loadEnrichConfig(cliConfig.collectorAndEnrich)
         igluResources <- loadIgluResources(cliConfig.iglu, enrichConfig.maxJsonDepth)
         enrichmentsConfig <- loadEnrichmentConfig(igluResources.client, cliConfig.yauaa)
         authConfig <- loadAuthConfig(cliConfig.auth)
@@ -209,9 +212,9 @@ object Configuration {
 
   private def loadCollectorConfig(path: Option[Path]): EitherT[IO, String, CollectorConfig[SinkConfig]] = {
     val resolveOrder = (config: TypesafeConfig) =>
-      namespaced(ConfigFactory.load(
-        namespaced(config.withFallback(
-          namespaced(ConfigFactory.parseResources("collector-micro.conf")
+      collectorNamespaced(ConfigFactory.load(
+        collectorNamespaced(config.withFallback(
+          collectorNamespaced(ConfigFactory.parseResources("collector-micro.conf")
             // collector-reference.conf only exists in fat jars
             // in Docker or sbt run, the fallback is correctly placed in the Collector jar
             .withFallback(ConfigFactory.parseResources("collector-reference.conf"))
@@ -263,11 +266,15 @@ object Configuration {
     }
   }
 
-  def loadEnrichConfig(): EitherT[IO, String, EnrichConfig] = {
-    val resolveOrder = (config: TypesafeConfig) => ConfigFactory.load(config)
+  def loadEnrichConfig(configPath: Option[Path]): EitherT[IO, String, EnrichConfig] = {
+    val resolveOrder = (config: TypesafeConfig) =>
+      enrichNamespaced(ConfigFactory.load(
+        enrichNamespaced(config.withFallback(
+          enrichNamespaced(ConfigFactory.parseResources("enrich-micro.conf"))
+        ))
+      ))
 
-    //It's not configurable in micro, we load it from reference.conf provided by enrich
-    loadConfig[EnrichConfig](path = None, resolveOrder)
+    loadConfig[EnrichConfig](configPath, resolveOrder)
   }
 
   private def loadAuthConfig(authConfigPath: Option[Path]): EitherT[IO, String, Option[AuthConfig]] = {
@@ -377,13 +384,15 @@ object Configuration {
     }
   }
 
-  private def namespaced(config: TypesafeConfig): TypesafeConfig = {
-    val namespace = "collector"
+  private def namespaced(config: TypesafeConfig, namespace: String): TypesafeConfig = {
     if (config.hasPath(namespace))
       config.getConfig(namespace).withFallback(config.withoutPath(namespace))
     else
       config
   }
+
+  private def collectorNamespaced(config: TypesafeConfig) = namespaced(config, "collector")
+  private def enrichNamespaced(config: TypesafeConfig) = namespaced(config, "enrich")
 
   implicit val resolverDecoder: Decoder[ResolverConfig] = Decoder.decodeJson.emap(json => Resolver.parseConfig(json).leftMap(_.show))
 

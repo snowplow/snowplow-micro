@@ -22,6 +22,7 @@ import com.snowplowanalytics.snowplow.collector.core.Sink
 import com.snowplowanalytics.snowplow.enrich.common.EtlPipeline
 import com.snowplowanalytics.snowplow.enrich.common.adapters.{AdapterRegistry, RawEvent}
 import com.snowplowanalytics.snowplow.enrich.common.enrichments.{EnrichmentManager, EnrichmentRegistry}
+import com.snowplowanalytics.snowplow.runtime.processing.Coldswap
 import com.snowplowanalytics.snowplow.enrich.common.loaders.ThriftLoader
 import com.snowplowanalytics.snowplow.enrich.common.utils.{ConversionUtils, OptionIor, OptionIorT}
 import io.circe.syntax._
@@ -44,7 +45,7 @@ import java.time.Instant
  */
 final class EventSink(igluClient: IgluCirceClient[IO],
                       registryLookup: RegistryLookup[IO],
-                      enrichmentRegistry: EnrichmentRegistry[IO],
+                      registryColdswap: Coldswap[IO, EnrichmentRegistry[IO]],
                       outputFormat: OutputFormat,
                       destination: Option[Uri],
                       processor: Processor,
@@ -132,19 +133,20 @@ final class EventSink(igluClient: IgluCirceClient[IO],
    *   or error if the event couldn't be validated.
    */
   private[micro] def validateEvent(rawEvent: RawEvent): OptionIorT[IO, (List[String], BadRow), GoodEvent] =
-    EnrichmentManager.enrichEvent[IO](
-        enrichmentRegistry,
-        igluClient,
-        processor,
-        DateTime.now(),
-        rawEvent,
-        EtlPipeline.FeatureFlags(acceptInvalid = false),
-        IO.unit,
-        registryLookup,
-        enrichConfig.validation.atomicFieldsLimits,
-        emitIncomplete = true,
-        enrichConfig.maxJsonDepth
-      )
+    OptionIorT(registryColdswap.opened.use { enrichmentRegistry =>
+      EnrichmentManager.enrichEvent[IO](
+          enrichmentRegistry,
+          igluClient,
+          processor,
+          DateTime.now(),
+          rawEvent,
+          EtlPipeline.FeatureFlags(acceptInvalid = false),
+          IO.unit,
+          registryLookup,
+          enrichConfig.validation.atomicFieldsLimits,
+          emitIncomplete = true,
+          enrichConfig.maxJsonDepth
+        )
       .leftMap(NonEmptyList.one(_)) // Because the following `.flatMap requires a SemiGroup on the Left
       .flatMap { enriched =>
         val ior: OptionIor[NonEmptyList[BadRow], Event] = EventConverter.fromEnriched(enriched) match {
@@ -164,6 +166,8 @@ final class EventSink(igluClient: IgluCirceClient[IO],
         val badRow = nel.head
         (List("Error while validating the event.", badRow.compact), badRow)
       }
+      .value
+    })
 
   private def getEnrichedSchema(enriched: Event): Option[String] =
     List(enriched.event_vendor, enriched.event_name, enriched.event_format, enriched.event_version)

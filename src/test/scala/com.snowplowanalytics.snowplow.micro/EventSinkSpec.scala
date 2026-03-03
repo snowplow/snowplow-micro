@@ -25,6 +25,7 @@ import com.snowplowanalytics.snowplow.enrich.common.enrichments.EnrichmentRegist
 import com.snowplowanalytics.snowplow.enrich.common.enrichments.registry.JavascriptScriptEnrichment
 import com.snowplowanalytics.snowplow.enrich.common.utils.OptionIor
 import com.snowplowanalytics.snowplow.micro.Configuration.OutputFormat
+import com.snowplowanalytics.snowplow.runtime.processing.Coldswap
 import org.specs2.mutable.SpecificationLike
 
 import scala.io.Source
@@ -163,15 +164,16 @@ class EventSinkSpec extends CatsResource[IO, EventSink] with SpecificationLike {
 
   private def createSink(): Resource[IO, EventSink] = {
     for {
-      enrichConfig <- Resource.eval(Configuration.loadEnrichConfig().value.map(_.getOrElse(throw new IllegalArgumentException("Can't read defaults from Enrich config"))))
+      enrichConfig <- Resource.eval(Configuration.loadEnrichConfig(None).value.map(_.getOrElse(throw new IllegalArgumentException("Can't read defaults from Enrich config"))))
       igluClient <- Resource.eval(IgluCirceClient.fromResolver[IO](Resolver[IO](List(Registry.IgluCentral), None), 500, enrichConfig.maxJsonDepth))
       jsEnrichment <- Resource.eval(buildJSEnrichment())
       enrichmentRegistry = new EnrichmentRegistry[IO](javascriptScript = List(jsEnrichment))
+      registryColdswap <- Coldswap.make(Resource.pure[IO, EnrichmentRegistry[IO]](enrichmentRegistry))
       processor = Processor(BuildInfo.name, BuildInfo.version)
       lookup = JavaNetRegistryLookup.ioLookupInstance[IO]
       httpClient <- EmberClientBuilder.default[IO].build
       storage = new InMemoryStorage()
-    } yield new EventSink(igluClient, lookup, enrichmentRegistry, OutputFormat.None, None, processor, enrichConfig, httpClient, storage)
+    } yield new EventSink(igluClient, lookup, registryColdswap, OutputFormat.None, None, processor, enrichConfig, httpClient, storage)
   }
 
   private def buildJSEnrichment(): IO[JavascriptScriptEnrichment] = {
