@@ -17,7 +17,7 @@ object Dependencies {
   object V {
     // Snowplow
     val snowplowStreamCollector = "3.7.0"
-    val snowplowCommonEnrich    = "6.1.2"
+    val snowplowCommonEnrich    = "6.9.0"
     val snowplowAnalyticsSdk    = "3.2.0"
 
     val http4sCirce = "0.23.23"
@@ -37,7 +37,7 @@ object Dependencies {
     val azureStorageBlob = "12.25.1"
     val azureIdentity    = "1.13.3"
 
-    val snowplowRuntime = "0.20.0-M2"
+    val snowplowRuntime = "0.21.0"
 
     // force versions of transitive dependencies
     val badRows   = "2.2.0"
