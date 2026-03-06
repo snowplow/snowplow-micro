@@ -57,7 +57,8 @@ object Run {
       sslContext <- Resource.eval(setupSSLContext())
       httpClient <- EmberClientBuilder.default[IO].build
       sqlEC <- SqlExecutionContext.mk[IO]
-      assetStateRef <- Resource.eval(AssetRefresher.initialDownload(config.enrichmentsConfig))
+      clients <- AssetRefresher.makeClients(config.enrichmentsConfig)
+      assetStateRef <- Resource.eval(AssetRefresher.initialDownload(config.enrichmentsConfig, clients))
       registryResource = enrichmentRegistryResource(config.enrichmentsConfig, httpClient, sqlEC, config.enrichConfig.jsAllowedJavaClasses)
       registryColdswap <- Coldswap.make(registryResource)
       _ <- Resource.eval(registryColdswap.opened.use_)
@@ -69,7 +70,7 @@ object Run {
       sink = new EventSink(config.iglu.client, lookup, registryColdswap, config.outputFormat, config.destination, badProcessor, config.enrichConfig, httpClient, storage)
       sinks = Sinks(sink, sink)
       _ <- AssetRefresher
-        .updateStream(config.enrichConfig.assetsUpdatePeriod, assetStateRef, registryColdswap)
+        .updateStream(config.enrichConfig.assetsUpdatePeriod, assetStateRef, clients, registryColdswap)
         .compile
         .drain
         .background

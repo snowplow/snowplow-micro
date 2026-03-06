@@ -10,16 +10,17 @@
 
 package com.snowplowanalytics.snowplow.micro
 
-import cats.effect.{IO, Ref}
+import cats.effect.{IO, Resource}
+import cats.effect.std.AtomicCell
 import cats.implicits._
 import com.snowplowanalytics.snowplow.enrich.common.enrichments.EnrichmentRegistry
 import com.snowplowanalytics.snowplow.enrich.common.enrichments.registry.EnrichmentConf
 import com.snowplowanalytics.snowplow.runtime.processing.Coldswap
 import fs2.Stream
-import fs2.io.file.{Files, Path}
 import org.typelevel.log4cats.Logger
 import org.typelevel.log4cats.slf4j.Slf4jLogger
 
+import java.io.{FileOutputStream, OutputStream}
 import java.net.URI
 import java.nio.ByteBuffer
 import scala.concurrent.duration._
@@ -31,22 +32,34 @@ object AssetRefresher {
   case class AssetState(uri: URI, filePath: String, etag: Option[String])
   private case class UpdatedAsset(filePath: String, content: ByteBuffer)
 
-  def initialDownload(configs: List[EnrichmentConf]): IO[Ref[IO, List[AssetState]]] = {
+  def makeClients(configs: List[EnrichmentConf]): Resource[IO, Map[BlobClient, BlobClientImpl]] = {
+    val assets = configs.flatMap(_.filesToCache)
+    val blobClients = assets.map { case (uri, _) => BlobUtils.blobClientFor(uri) }.distinct
+    blobClients.traverse { bc =>
+      bc.mk.map(impl => bc -> impl)
+    }.map(_.toMap)
+  }
+
+  def initialDownload(
+    configs: List[EnrichmentConf],
+    clients: Map[BlobClient, BlobClientImpl]
+  ): IO[AtomicCell[IO, List[AssetState]]] = {
     val assets = configs.flatMap(_.filesToCache)
     for {
-      results <- downloadAllAssets(assets.map { case (uri, path) => AssetState(uri, path, None) })
+      results <- downloadAllAssets(assets.map { case (uri, path) => AssetState(uri, path, None) }, clients, tolerateErrors = false)
       _ <- results.flatMap(_._2).traverse_(asset => writeToFile(asset.content, asset.filePath))
-      stateRef <- Ref.of[IO, List[AssetState]](results.map(_._1))
-    } yield stateRef
+      atomicCell <- AtomicCell[IO].of(results.map(_._1))
+    } yield atomicCell
   }
 
   def updateStream(
     period: FiniteDuration,
-    stateRef: Ref[IO, List[AssetState]],
+    atomicCell: AtomicCell[IO, List[AssetState]],
+    clients: Map[BlobClient, BlobClientImpl],
     registryColdswap: Coldswap[IO, EnrichmentRegistry[IO]]
   ): Stream[IO, Nothing] = {
     Stream.fixedDelay[IO](period).evalMap { _ =>
-      refreshAssets(stateRef, registryColdswap)
+      refreshAssets(atomicCell, clients, registryColdswap)
         .handleErrorWith { error =>
           logger.warn(s"Asset refresh failed, keeping existing registry: ${error.getMessage}")
         }
@@ -54,41 +67,46 @@ object AssetRefresher {
   }
 
   private def refreshAssets(
-    stateRef: Ref[IO, List[AssetState]],
+    atomicCell: AtomicCell[IO, List[AssetState]],
+    clients: Map[BlobClient, BlobClientImpl],
     registryColdswap: Coldswap[IO, EnrichmentRegistry[IO]]
   ): IO[Unit] = {
-    for {
-      currentState <- stateRef.get
-      results <- downloadAllAssets(currentState)
-      updatedAssets = results.flatMap(_._2)
-      _ <- if (updatedAssets.nonEmpty) {
+    atomicCell.evalUpdate { currentState =>
+      downloadAllAssets(currentState, clients, tolerateErrors = true).flatMap { results =>
+        val updatedAssets = results.flatMap(_._2)
         val newStates = results.map(_._1)
-        for {
-          _ <- logger.info("Asset changes detected, rebuilding enrichment registry")
-          _ <- registryColdswap.closed.surround {
-            updatedAssets.traverse_(asset => writeToFile(asset.content, asset.filePath))
-          }
-          _ <- stateRef.set(newStates)
-        } yield ()
-      } else {
-        logger.debug("No asset changes detected")
+        if (updatedAssets.nonEmpty)
+          for {
+            _ <- logger.info("Asset changes detected, rebuilding enrichment registry")
+            _ <- registryColdswap.closed.surround {
+              updatedAssets.traverse_(asset => writeToFile(asset.content, asset.filePath))
+            }
+          } yield newStates
+        else
+          logger.debug("No asset changes detected").as(currentState)
       }
-    } yield ()
+    }
   }
 
-  private def downloadAllAssets(assets: List[AssetState]): IO[List[(AssetState, Option[UpdatedAsset])]] = {
+  private def downloadAllAssets(
+    assets: List[AssetState],
+    clients: Map[BlobClient, BlobClientImpl],
+    tolerateErrors: Boolean
+  ): IO[List[(AssetState, Option[UpdatedAsset])]] = {
     assets
       .groupBy(asset => BlobUtils.blobClientFor(asset.uri))
       .toList
       .flatTraverse { case (blobClient, groupedAssets) =>
-        blobClient.mk.use { client =>
-          groupedAssets.traverse { asset =>
-            downloadSingleAsset(client, asset)
-              .handleErrorWith { error =>
-                logger.warn(s"Failed to check asset ${asset.uri}: ${error.getMessage}")
-                  .as((asset, None))
-              }
-          }
+        val client = clients(blobClient)
+        groupedAssets.traverse { asset =>
+          val download = downloadSingleAsset(client, asset)
+          if (tolerateErrors)
+            download.handleErrorWith { error =>
+              logger.warn(s"Failed to check asset ${asset.uri}: ${error.getMessage}")
+                .as((asset, None))
+            }
+          else
+            download
         }
       }
   }
@@ -103,10 +121,10 @@ object AssetRefresher {
     }
   }
 
-  private def writeToFile(content: ByteBuffer, filePath: String): IO[Unit] = {
-    Stream.chunk(fs2.Chunk.byteBuffer(content))
-      .through(Files[IO].writeAll(Path(filePath)))
+  private def writeToFile(content: ByteBuffer, filePath: String): IO[Unit] =
+    Stream
+      .chunk(fs2.Chunk.byteBuffer(content))
+      .through(fs2.io.writeOutputStream(IO.blocking[OutputStream](new FileOutputStream(filePath))))
       .compile
       .drain
-  }
 }

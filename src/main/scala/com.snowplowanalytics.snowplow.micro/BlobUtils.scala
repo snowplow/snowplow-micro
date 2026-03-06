@@ -13,16 +13,17 @@ package com.snowplowanalytics.snowplow.micro
 import software.amazon.awssdk.services.s3.S3AsyncClient
 import software.amazon.awssdk.services.s3.model.{GetObjectRequest, GetObjectResponse}
 import software.amazon.awssdk.core.async.AsyncResponseTransformer
-import com.google.cloud.storage.{StorageOptions, BlobId}
+import com.google.cloud.storage.{Storage, StorageOptions, BlobId}
+import com.azure.core.http.HttpHeaderName
 import com.azure.storage.blob.{BlobServiceAsyncClient, BlobServiceClientBuilder, BlobUrlParts}
+import com.azure.storage.blob.models.{BlobRequestConditions, BlobStorageException}
 
 import java.nio.ByteBuffer
 import cats.effect.{IO, Resource, Sync}
 import cats.implicits._
 import com.azure.identity.DefaultAzureCredentialBuilder
 import com.snowplowanalytics.snowplow.micro.Configuration.EnvironmentVariables
-import fs2.{Stream, Chunk}
-import fs2.io.file.{Files, Path}
+
 import org.http4s.ember.client.EmberClientBuilder
 import org.http4s.{Method, Request, Status, Uri}
 import software.amazon.awssdk.awscore.defaultsmode.DefaultsMode
@@ -107,9 +108,11 @@ case object GCSClient extends BlobClient {
             val remoteEtag = Option(blob.getEtag)
             if (currentEtag.isDefined && currentEtag == remoteEtag)
               IO.pure(NotModified: DownloadResult)
-            else
-              Sync[IO].blocking(service.readAllBytes(blobId))
+            else {
+              val generation = blob.getGeneration
+              Sync[IO].blocking(service.readAllBytes(blobId, Storage.BlobSourceOption.generationMatch(generation)))
                 .map(bytes => Downloaded(ByteBuffer.wrap(bytes), remoteEtag): DownloadResult)
+            }
           case None =>
             IO.raiseError(new RuntimeException(s"Blob not found: $uri"))
         }
@@ -131,16 +134,16 @@ case class AzureClient(account: String) extends BlobClient {
           .getBlobContainerAsyncClient(inputParts.getBlobContainerName)
           .getBlobAsyncClient(inputParts.getBlobName)
 
+        val conditions = currentEtag.map(etag => new BlobRequestConditions().setIfNoneMatch(etag)).orNull
+
         Sync[IO].fromCompletableFuture(
-          Sync[IO].delay(blobClient.getProperties.toFuture)
-        ).flatMap { props =>
-          val remoteEtag = Option(props.getETag)
-          if (currentEtag.isDefined && currentEtag == remoteEtag)
-            IO.pure(NotModified: DownloadResult)
-          else
-            Sync[IO].fromCompletableFuture(
-              Sync[IO].delay(blobClient.downloadContent().toFuture)
-            ).map(binaryData => Downloaded(binaryData.toByteBuffer, remoteEtag): DownloadResult)
+          Sync[IO].delay(blobClient.downloadContentWithResponse(null, conditions).toFuture)
+        ).map { response =>
+          val remoteEtag = Option(response.getHeaders.getValue(HttpHeaderName.ETAG))
+          Downloaded(response.getValue.toByteBuffer, remoteEtag): DownloadResult
+        }.recover {
+          case e: BlobStorageException if e.getStatusCode == 304 =>
+            NotModified: DownloadResult
         }
       }
 
