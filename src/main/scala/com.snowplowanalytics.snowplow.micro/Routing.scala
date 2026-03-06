@@ -33,8 +33,6 @@ import org.http4s.server.middleware.GZip
 import org.http4s.{AuthedRoutes, HttpRoutes, Response, StaticFile}
 import org.joda.time.DateTime
 
-import java.time.Instant
-
 sealed trait MicroRoutes[S <: EventStorage] extends Http4sDsl[IO] {
   protected def igluResolver: Resolver[IO]
   protected def storage: S
