@@ -17,7 +17,7 @@ object Dependencies {
   object V {
     // Snowplow
     val snowplowStreamCollector = "3.7.0"
-    val snowplowCommonEnrich    = "6.1.2"
+    val snowplowCommonEnrich    = "6.9.0"
     val snowplowAnalyticsSdk    = "3.2.0"
 
     val http4sCirce = "0.23.23"
@@ -41,7 +41,7 @@ object Dependencies {
     val badRows   = "2.2.0"
   }
 
-  val snowplowStreamCollector = "com.snowplowanalytics" %% "snowplow-stream-collector-http4s-core" % V.snowplowStreamCollector 
+  val snowplowStreamCollector = "com.snowplowanalytics" %% "snowplow-stream-collector-http4s-core" % V.snowplowStreamCollector
   val snowplowCommonEnrich    = "com.snowplowanalytics" %% "snowplow-common-enrich"                % V.snowplowCommonEnrich
   val snowplowAnalyticsSdk    = "com.snowplowanalytics" %% "snowplow-scala-analytics-sdk"          % V.snowplowAnalyticsSdk
   
