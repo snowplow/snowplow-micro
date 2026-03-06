@@ -1,3 +1,7 @@
+Version 4.1.0 (2026-03-06)
+--------------------------
+Bump enrich to 6.9.0, add Iglu cache TTL and configurable enrich settings (#189)
+
 Version 4.0.0 (2026-01-30)
 --------------------------
 Integrate with Snowplow Console SSO (#176)
