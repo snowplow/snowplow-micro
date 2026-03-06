@@ -21,10 +21,11 @@ import com.snowplowanalytics.snowplow.collector.core._
 import com.snowplowanalytics.snowplow.collector.core.Sinks
 import com.snowplowanalytics.snowplow.collector.thrift.CollectorPayload
 import com.snowplowanalytics.snowplow.enrich.common.enrichments.EnrichmentRegistry
-import com.snowplowanalytics.snowplow.enrich.common.enrichments.registry.{Enrichment, EnrichmentConf, IpLookupExecutionContext}
+import com.snowplowanalytics.snowplow.enrich.common.enrichments.registry.EnrichmentConf
 import com.snowplowanalytics.snowplow.enrich.common.enrichments.registry.sqlquery.SqlExecutionContext
 import com.snowplowanalytics.snowplow.enrich.common.utils.HttpClient
 import com.snowplowanalytics.snowplow.micro.Configuration.MicroConfig
+import com.snowplowanalytics.snowplow.runtime.processing.Coldswap
 import org.http4s.ember.client.EmberClientBuilder
 import org.http4s.client.Client
 import org.typelevel.log4cats.Logger
@@ -32,6 +33,7 @@ import org.typelevel.log4cats.slf4j.Slf4jLogger
 
 import java.security.{KeyStore, SecureRandom}
 import javax.net.ssl.{KeyManagerFactory, SSLContext, TrustManagerFactory}
+import scala.concurrent.ExecutionContext
 
 object Run {
 
@@ -54,14 +56,24 @@ object Run {
     for {
       sslContext <- Resource.eval(setupSSLContext())
       httpClient <- EmberClientBuilder.default[IO].build
-      enrichmentRegistry <- buildEnrichmentRegistry(config.enrichmentsConfig, httpClient)
+      sqlEC <- SqlExecutionContext.mk[IO]
+      clients <- AssetRefresher.makeClients(config.enrichmentsConfig)
+      assetStateRef <- Resource.eval(AssetRefresher.initialDownload(config.enrichmentsConfig, clients))
+      registryResource = enrichmentRegistryResource(config.enrichmentsConfig, httpClient, sqlEC, config.enrichConfig.jsAllowedJavaClasses)
+      registryColdswap <- Coldswap.make(registryResource)
+      _ <- Resource.eval(registryColdswap.opened.use_)
       badProcessor = Processor(BuildInfo.name, BuildInfo.version)
       lookup = JavaNetRegistryLookup.ioLookupInstance[IO]
       queue <- Resource.eval(Queue.unbounded[IO, CollectorPayload])
       storage <- EventStorage.create(config.storage)
       microRoutes = Routing.create(config, storage, config.auth, lookup)
-      sink = new EventSink(config.iglu.client, lookup, enrichmentRegistry, config.outputFormat, config.destination, badProcessor, config.enrichConfig, httpClient, storage)
+      sink = new EventSink(config.iglu.client, lookup, registryColdswap, config.outputFormat, config.destination, badProcessor, config.enrichConfig, httpClient, storage)
       sinks = Sinks(sink, sink)
+      _ <- AssetRefresher
+        .updateStream(config.enrichConfig.assetsUpdatePeriod, assetStateRef, clients, registryColdswap)
+        .compile
+        .drain
+        .background
       _ <- Sinks
         .dequeue(config.collector, BuildInfo, queue, sinks)
         .compile
@@ -105,18 +117,20 @@ object Run {
     }
   }
 
-  private def buildEnrichmentRegistry(configs: List[EnrichmentConf], httpClient: Client[IO]): Resource[IO, EnrichmentRegistry[IO]] = {
+  private def enrichmentRegistryResource(
+    configs: List[EnrichmentConf],
+    httpClient: Client[IO],
+    sqlEC: ExecutionContext,
+    jsAllowedJavaClasses: Set[String]
+  ): Resource[IO, EnrichmentRegistry[IO]] = {
+    val enrichHttpClient = HttpClient.fromHttp4sClient[IO](httpClient)
     for {
-      _ <- Resource.eval(downloadAssets(configs))
-      ipLookupEC <- IpLookupExecutionContext.mk[IO]
-      sqlEC <- SqlExecutionContext.mk[IO]
-      enrichHttpClient = HttpClient.fromHttp4sClient[IO](httpClient)
-      enrichmentRegistry <- Resource.eval(EnrichmentRegistry.build[IO](configs, enrichHttpClient, ipLookupEC, sqlEC, false)
+      enrichmentRegistry <- Resource.eval(EnrichmentRegistry.build[IO](configs, enrichHttpClient, sqlEC, false, jsAllowedJavaClasses)
         .leftMap(error => new IllegalArgumentException(s"can't build EnrichmentRegistry: $error"))
         .value.rethrow)
       _ <- Resource.eval {
         val loadedEnrichments = enrichmentRegistry.productIterator.toList.collect {
-          case Some(e: Enrichment) => e.getClass.getSimpleName
+          case Some(e) => e.getClass.getSimpleName
         }
         if (loadedEnrichments.nonEmpty) {
           logger.info(s"Enabled enrichments: ${loadedEnrichments.mkString(", ")}")
@@ -124,20 +138,7 @@ object Run {
           logger.info(s"No enrichments enabled")
         }
       }
-
     } yield enrichmentRegistry
-  }
-
-  private def downloadAssets(configs: List[EnrichmentConf]): IO[Unit] = {
-    configs
-      .flatMap(_.filesToCache)
-      .groupBy {
-        case (uri, _) => BlobUtils.blobClientFor(uri)
-      }
-      .toList
-      .traverse_ {
-        case (client, assets) => client.mk.use(_.downloadToFiles(assets))
-      }
   }
 
   private def handleAppErrors(appOutput: EitherT[IO, String, ExitCode]): IO[ExitCode] = {
