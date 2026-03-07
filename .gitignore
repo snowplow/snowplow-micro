@@ -4,3 +4,5 @@ config/
 .bsp/
 .idea/
 stream-collector
+.metals/
+.vscode/

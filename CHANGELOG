@@ -1,3 +1,7 @@
+Version 4.1.1 (2026-03-07)
+--------------------------
+Micro 4.1.0 fails to start with Netty component mismatches (#191)
+
 Version 4.1.0 (2026-03-06)
 --------------------------
 Bump enrich to 6.9.0, add Iglu cache TTL and configurable enrich settings (#189)

@@ -29,6 +29,14 @@ lazy val buildSettings = Seq(
 )
 
 lazy val dependencies = Seq(
+  // Force netty-tcnative to the version matching the netty-handler major that ends up in the
+  // fatjar (4.2.x, pulled in by azure-core-http-netty / reactor-netty).  Without this override
+  // SBT keeps the 2.0.65.Final jar that the AWS SDK declared, which was built for 4.1.x and
+  // is missing SSL.setCurvesList(), causing a NoSuchMethodError on every S3 TLS connection.
+  dependencyOverrides ++= Seq(
+    Dependencies.nettyTcnativeBoringssl,
+    Dependencies.nettyTcnativeClasses
+  ),
   libraryDependencies ++= Seq(
     Dependencies.snowplowStreamCollector,
     Dependencies.snowplowCommonEnrich,

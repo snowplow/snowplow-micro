@@ -36,6 +36,7 @@ object Dependencies {
     val gcpSdk           = "2.45.0"
     val azureStorageBlob = "12.25.1"
     val azureIdentity    = "1.13.3"
+    val nettyTcnative    = "2.0.75.Final"
 
     // force versions of transitive dependencies
     val badRows   = "2.2.0"
@@ -76,4 +77,12 @@ object Dependencies {
 
   // transitive
   val badRows = "com.snowplowanalytics" %% "snowplow-badrows" % V.badRows
+
+  // Netty tcnative — must match the netty-handler major version in the fatjar.
+  // azure-core-http-netty pulls in netty 4.2.x, evicting the 4.1.x that the AWS SDK ships with.
+  // netty-tcnative 2.0.65.Final (AWS SDK default) was built for 4.1.x and is missing
+  // SSL.setCurvesList() which netty-handler 4.2.x calls, causing a NoSuchMethodError on every
+  // S3 TLS handshake.  Force both artifacts to the version mandated by the Netty 4.2.10 BOM.
+  val nettyTcnativeBoringssl = "io.netty" % "netty-tcnative-boringssl-static" % V.nettyTcnative
+  val nettyTcnativeClasses   = "io.netty" % "netty-tcnative-classes"          % V.nettyTcnative
 }
