@@ -34,8 +34,8 @@ object Dependencies {
     // cloud SDKs
     val awsSdk           = "2.33.1"
     val gcpSdk           = "2.45.0"
-    val azureStorageBlob = "12.25.1"
-    val azureIdentity    = "1.13.3"
+    val azureStorageBlob = "12.33.2"
+    val azureIdentity    = "1.18.2"
 
     // force versions of transitive dependencies
     val badRows   = "2.2.0"
