@@ -33,7 +33,7 @@ object Auth extends Http4sDsl[IO] {
     .build
 
   private def authorize(authHeader: Authorization, authConfig: AuthConfig, client: Client[IO]): IO[Either[String, Unit]] = {
-    val uri = Uri.unsafeFromString(s"https://${authConfig.apiDomain}/api/msc/internal/authz/query/v1/${authConfig.organizationId}/minis/list")
+    val uri = Uri.unsafeFromString(s"https://${authConfig.apiDomain}/api/msc/internal/authz/query/v1/${authConfig.organizationId}/micros/view")
     val headers = Headers(authHeader, Accept(MediaType.application.json))
     val request = Request[IO](Method.POST, uri)
       .withHeaders(headers)
