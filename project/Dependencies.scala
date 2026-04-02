@@ -20,7 +20,7 @@ object Dependencies {
     val snowplowCommonEnrich    = "6.10.0"
     val snowplowAnalyticsSdk    = "3.2.0"
 
-    val http4sCirce = "0.23.23"
+    val http4s = "0.23.33"
     val decline     = "2.4.1"
     val slf4j       = "2.0.17"
     val doobie      = "1.0.0-RC10"
@@ -31,8 +31,8 @@ object Dependencies {
     val specs2CE = "1.5.0"
 
     // cloud SDKs
-    val awsSdk           = "2.33.1"
-    val gcpSdk           = "2.45.0"
+    val awsSdk           = "2.42.26"
+    val gcpSdk           = "2.64.1"
     val azureStorageBlob = "12.33.2"
     val azureIdentity    = "1.18.2"
   }
@@ -41,7 +41,8 @@ object Dependencies {
   val snowplowCommonEnrich    = "com.snowplowanalytics" %% "snowplow-common-enrich"                % V.snowplowCommonEnrich
   val snowplowAnalyticsSdk    = "com.snowplowanalytics" %% "snowplow-scala-analytics-sdk"          % V.snowplowAnalyticsSdk
   
-  val http4sCirce  = "org.http4s"    %% "http4s-circe"        % V.http4sCirce
+  val http4sCirce  = "org.http4s"    %% "http4s-circe"        % V.http4s
+  val http4sClient = "org.http4s"    %% "http4s-ember-client" % V.http4s
   val decline      = "com.monovore"  %% "decline-effect"      % V.decline
   val slf4jSimple  = "org.slf4j"     %  "slf4j-simple"        % V.slf4j
 
