@@ -10,6 +10,11 @@ import com.typesafe.sbt.packager.docker.*
 
 import scala.collection.Seq
 
+lazy val nashornJvmOptions = List(
+  "-Dnashorn.args=--language=es6",
+  "-Dnashorn.propertyMap.softReferenceDerivationLimit=0"
+)
+
 lazy val buildSettings = Seq(    
   name := "snowplow-micro",
   organization := "com.snowplowanalytics.snowplow",
@@ -24,7 +29,7 @@ lazy val buildSettings = Seq(
   Compile / unmanagedResources += file("LICENSE.md"),
   resolvers ++= Dependencies.resolvers,
   Test / parallelExecution := false,
-  Test / javaOptions := Seq("-Dnashorn.args=--language=es6"),
+  Test / javaOptions := nashornJvmOptions,
   Test / fork := true
 )
 
@@ -87,9 +92,7 @@ lazy val microSettingsDistroless = dockerCommon ++ Seq(
   dockerBaseImage := "gcr.io/distroless/java21-debian12:nonroot",
   Docker / daemonUser := "nonroot",
   Docker / daemonGroup := "nonroot",
-  dockerEntrypoint := Seq(
-    "java",
-    "-Dnashorn.args=--language=es6",
+  dockerEntrypoint := "java" :: nashornJvmOptions ::: List(
     "-cp",
     s"/opt/snowplow/lib/${(packageJavaClasspathJar / artifactPath).value.getName}:/opt/snowplow/ui:/config",
     "com.snowplowanalytics.snowplow.micro.Main"
@@ -104,7 +107,7 @@ lazy val microSettings = dockerCommon ++ Seq(
   dockerBaseImage := "eclipse-temurin:21",
   Docker / daemonUser := "daemon",
   scriptClasspath ++= Seq("/opt/snowplow/ui", "/config"),
-  Universal / javaOptions ++= Seq("-Dnashorn.args=--language=es6"),
+  Universal / javaOptions ++= nashornJvmOptions,
   Universal / mappings ++= directory(baseDirectory.value / "ui" / "out").map {
     case (source, destination) => (source, destination.replaceFirst("^out/", "ui/"))
   }
