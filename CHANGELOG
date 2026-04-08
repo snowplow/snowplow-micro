@@ -1,3 +1,9 @@
+Version 4.2.0 (2026-04-08)
+--------------------------
+Add Nashorn property map JVM option to reduce GC pressure (#199)
+Bump versions ready for release (#198)
+Bump Enrich to 6.10.0 (#197)
+
 Version 4.1.2 (2026-03-20)
 --------------------------
 Update permissions for Console SSO integration (#195)
