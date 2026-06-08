@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useAuth } from '@/contexts/AuthContext'
 import { DataTable } from '@/components/DataTable'
 import { ColumnSelector } from '@/components/ColumnSelector'
@@ -15,6 +15,7 @@ import {
 } from '@/services/api'
 import { useColumnManager } from '@/hooks/useColumnManager'
 import { Button } from '@/components/ui/button'
+import { Toggle } from '@/components/ui/toggle'
 import {
   Tooltip,
   TooltipContent,
@@ -27,6 +28,7 @@ import {
   Columns3Cog,
   FilterX,
   MoreVertical,
+  TimerReset,
 } from 'lucide-react'
 import { type ColumnFiltersState, type SortingState } from '@tanstack/react-table'
 
@@ -58,6 +60,9 @@ function App() {
     {}
   )
   const [sorting, setSorting] = useState<SortingState>([])
+  const [autoRefresh, setAutoRefresh] = useState(false)
+  const autoRefreshIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const refreshAllDataRef = useRef<() => void>(() => {})
 
   // Handle scrolling to newly added columns
   const scrollToLastColumn = () => {
@@ -326,6 +331,30 @@ function App() {
     return () => clearTimeout(timeoutId)
   }, [columnFilters, selectedTimeBucket, currentPage, sorting, isAuthenticated])
 
+  // Keep refreshAllDataRef up to date so the interval always calls the latest version
+  useEffect(() => {
+    refreshAllDataRef.current = refreshAllData
+  })
+
+  // Auto-refresh interval management
+  useEffect(() => {
+    if (autoRefresh) {
+      autoRefreshIntervalRef.current = setInterval(() => {
+        refreshAllDataRef.current()
+      }, 3000)
+    } else {
+      if (autoRefreshIntervalRef.current) {
+        clearInterval(autoRefreshIntervalRef.current)
+        autoRefreshIntervalRef.current = null
+      }
+    }
+    return () => {
+      if (autoRefreshIntervalRef.current) {
+        clearInterval(autoRefreshIntervalRef.current)
+      }
+    }
+  }, [autoRefresh])
+
   // Initial load - only when authentication is ready
   useEffect(() => {
     if (isAuthenticated && !authIsLoading) {
@@ -386,17 +415,31 @@ function App() {
                 Last refreshed at {lastRefreshTime.toLocaleTimeString()}
               </span>
             )}
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => refreshAllData()}
-              disabled={isRefreshing}
-            >
-              <RefreshCw
-                className={`mr-2 h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`}
-              />
-              Refresh
-            </Button>
+            <div className="flex items-center">
+              <Button
+                variant="outline"
+                size="sm"
+                className="rounded-r-none border-r-0"
+                onClick={() => refreshAllData()}
+                disabled={isRefreshing}
+              >
+                <RefreshCw
+                  className={`mr-2 h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`}
+                />
+                Refresh
+              </Button>
+              <Toggle
+                variant="outline"
+                size="sm"
+                className="rounded-l-none cursor-pointer"
+                pressed={autoRefresh}
+                onPressedChange={setAutoRefresh}
+                aria-label="Auto-refresh"
+              >
+                <TimerReset className="h-4 w-4" />
+                Auto
+              </Toggle>
+            </div>
             {hasActiveFilters && (
               <TooltipProvider>
                 <Tooltip delayDuration={0}>
