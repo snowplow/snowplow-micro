@@ -1,3 +1,7 @@
+Version 4.2.1 (2026-06-08)
+--------------------------
+Add user_id to searchable columns and enable auto-refresh (#201)
+
 Version 4.2.0 (2026-04-08)
 --------------------------
 Add Nashorn property map JVM option to reduce GC pressure (#199)
