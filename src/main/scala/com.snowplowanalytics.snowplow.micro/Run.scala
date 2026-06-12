@@ -20,19 +20,15 @@ import com.snowplowanalytics.snowplow.badrows.Processor
 import com.snowplowanalytics.snowplow.collector.core._
 import com.snowplowanalytics.snowplow.collector.core.Sinks
 import com.snowplowanalytics.snowplow.collector.thrift.CollectorPayload
-import com.snowplowanalytics.snowplow.enrich.common.enrichments.EnrichmentRegistry
-import com.snowplowanalytics.snowplow.enrich.common.enrichments.registry.EnrichmentConf
-import com.snowplowanalytics.snowplow.enrich.common.enrichments.registry.EnrichmentConf._
 import com.snowplowanalytics.snowplow.enrich.common.enrichments.registry.sqlquery.SqlExecutionContext
 import com.snowplowanalytics.snowplow.enrich.common.utils.HttpClient
 
 import com.snowplowanalytics.snowplow.micro.Configuration.MicroConfig
+import com.snowplowanalytics.snowplow.micro.blob.BlobUtils
 import org.http4s.ember.client.EmberClientBuilder
 import org.http4s.client.Client
 import org.typelevel.log4cats.Logger
 import org.typelevel.log4cats.slf4j.Slf4jLogger
-
-import scala.concurrent.ExecutionContext
 
 import java.security.{KeyStore, SecureRandom}
 import javax.net.ssl.{KeyManagerFactory, SSLContext, TrustManagerFactory}
@@ -47,24 +43,27 @@ object Run {
         configuration
           .semiflatMap { validMicroConfig =>
             buildEnvironment(validMicroConfig)
-              .use(_ => IO.never)
+              // The assets-refresh stream runs in the foreground: it is infinite so it
+              // keeps Micro alive and if a refresh ultimately fails (after retries) the error
+              // propagates here and Micro exits
+              .use(refreshAssets => refreshAssets)
               .as(ExitCode.Success)
           }
       }
     }
   }
 
-  private def buildEnvironment(config: MicroConfig): Resource[IO, Unit] = {
+  private def buildEnvironment(config: MicroConfig): Resource[IO, IO[Unit]] = {
     for {
       sslContext <- Resource.eval(setupSSLContext())
       httpClient <- EmberClientBuilder.default[IO].build
-      enrichmentRegistry <- buildEnrichmentRegistry(config.enrichmentsConfig, httpClient, config.enrichConfig.jsAllowedJavaClasses)
+      managedRegistry <- buildManagedRegistry(config, httpClient)
       badProcessor = Processor(BuildInfo.name, BuildInfo.version)
       lookup = JavaNetRegistryLookup.ioLookupInstance[IO]
       queue <- Resource.eval(Queue.unbounded[IO, CollectorPayload])
       storage <- EventStorage.create(config.storage)
       microRoutes = Routing.create(config, storage, config.auth, lookup)
-      sink = new EventSink(config.iglu.client, lookup, enrichmentRegistry, config.outputFormat, config.destination, badProcessor, config.enrichConfig, httpClient, storage)
+      sink = new EventSink(config.iglu.client, lookup, managedRegistry, config.outputFormat, config.destination, badProcessor, config.enrichConfig, httpClient, storage)
       sinks = Sinks(sink, sink)
       _ <- Sinks
         .dequeue(config.collector, BuildInfo, queue, sinks)
@@ -85,7 +84,7 @@ object Run {
       )
       allRoutes = microRoutes <+> collectorRoutes.value <+> collectorRoutes.health
       _ <- MicroHttpServer.build(allRoutes, config, sslContext)
-    } yield ()
+    } yield managedRegistry.refreshStream(config.enrichConfig.assetsUpdatePeriod).compile.drain
   }
 
   private def setupSSLContext(): IO[Option[SSLContext]] = IO {
@@ -109,114 +108,41 @@ object Run {
     }
   }
 
-  private def buildEnrichmentRegistry(configs: List[EnrichmentConf], httpClient: Client[IO], jsAllowedJavaClasses: Set[String]): Resource[IO, EnrichmentRegistry[IO]] = {
+  /**
+   * Builds the [[ManagedEnrichmentRegistry]], which downloads enrichment assets, instantiates the
+   * enrichments, and wires up the per-enrichment hot-swap callbacks used by the asset refresher.
+   */
+  private def buildManagedRegistry(config: MicroConfig, httpClient: Client[IO]): Resource[IO, ManagedEnrichmentRegistry[IO]] =
     for {
-      _ <- Resource.eval(downloadAssets(configs))
       sqlEC <- SqlExecutionContext.mk[IO]
       enrichHttpClient = HttpClient.fromHttp4sClient[IO](httpClient)
-      enrichmentRegistry <- Resource.eval(buildRegistry(configs, enrichHttpClient, sqlEC, jsAllowedJavaClasses)
-        .leftMap(error => new IllegalArgumentException(s"can't build EnrichmentRegistry: $error"))
-        .value.rethrow)
-      _ <- Resource.eval {
-        val loadedEnrichments = enrichmentRegistry.productIterator.toList.collect {
-          case Some(e) => e.getClass.getSimpleName
-          case e :: _ => e.getClass.getSimpleName
+      blobClients = BlobUtils.blobClientFactories[IO](httpClient)
+      managedRegistry <- ManagedEnrichmentRegistry
+        .build[IO](
+          config.enrichmentsConfig,
+          blobClients,
+          enrichHttpClient,
+          sqlEC,
+          exitOnJsCompileError = false,
+          config.enrichConfig.jsAllowedJavaClasses
+        )
+        .evalMap {
+          case Right(registry) => IO.pure(registry)
+          case Left(error) => IO.raiseError(new IllegalArgumentException(s"can't build EnrichmentRegistry: $error"))
         }
-        if (loadedEnrichments.nonEmpty) {
-          logger.info(s"Enabled enrichments: ${loadedEnrichments.mkString(", ")}")
-        } else {
-          logger.info(s"No enrichments enabled")
-        }
-      }
-    } yield enrichmentRegistry
-  }
+      _ <- Resource.eval(logEnabledEnrichments(managedRegistry))
+    } yield managedRegistry
 
-  private def downloadAssets(configs: List[EnrichmentConf]): IO[Unit] = {
-    configs
-      .collect { case c: EnrichmentConf.WithAssets => c }
-      .flatMap(_.filesToCache)
-      .groupBy {
-        case (uri, _) => BlobUtils.blobClientFor(uri)
+  private def logEnabledEnrichments(managedRegistry: ManagedEnrichmentRegistry[IO]): IO[Unit] =
+    managedRegistry.snapshot.use { registry =>
+      val loadedEnrichments = registry.productIterator.toList.collect {
+        case Some(e) => e.getClass.getSimpleName
+        case e :: _ => e.getClass.getSimpleName
       }
-      .toList
-      .traverse_ {
-        case (client, assets) => client.mk.use(_.downloadToFiles(assets))
-      }
-  }
-
-  private def buildRegistry(
-    configs: List[EnrichmentConf],
-    enrichHttpClient: HttpClient[IO],
-    sqlEC: ExecutionContext,
-    jsAllowedJavaClasses: Set[String]
-  ): EitherT[IO, String, EnrichmentRegistry[IO]] =
-    configs.foldLeft(EitherT.pure[IO, String](EnrichmentRegistry[IO]())) { (er, conf) =>
-      conf match {
-        case c: ApiRequestConf =>
-          for {
-            enrichment <- EitherT.right(c.enrichment[IO](enrichHttpClient))
-            registry   <- er
-          } yield registry.copy(apiRequest = enrichment.some)
-        case c: PiiPseudonymizerConf => er.map(_.copy(piiPseudonymizer = c.enrichment.some))
-        case c: SqlQueryConf =>
-          for {
-            enrichment <- EitherT.right(c.enrichment[IO](sqlEC))
-            registry   <- er
-          } yield registry.copy(sqlQuery = enrichment.some)
-        case c: AnonIpConf             => er.map(_.copy(anonIp = c.enrichment.some))
-        case c: CampaignAttributionConf => er.map(_.copy(campaignAttribution = c.enrichment.some))
-        case c: CookieExtractorConf    => er.map(_.copy(cookieExtractor = c.enrichment.some))
-        case c: CurrencyConversionConf =>
-          for {
-            enrichment <- EitherT.right(c.enrichment[IO])
-            registry   <- er
-          } yield registry.copy(currencyConversion = enrichment.some)
-        case c: EventFingerprintConf   => er.map(_.copy(eventFingerprint = c.enrichment.some))
-        case c: HttpHeaderExtractorConf => er.map(_.copy(httpHeaderExtractor = c.enrichment.some))
-        case c: IabConf =>
-          for {
-            enrichment <- EitherT.right(c.enrichment[IO])
-            registry   <- er
-          } yield registry.copy(iab = enrichment.some)
-        case c: IpLookupsConf =>
-          for {
-            enrichment <- EitherT.right(c.enrichment[IO])
-            registry   <- er
-          } yield registry.copy(ipLookups = enrichment.some)
-        case c: AsnLookupsConf =>
-          for {
-            enrichment <- c.enrichment[IO]
-            registry   <- er
-          } yield registry.copy(asnLookups = enrichment.some)
-        case c: JavascriptScriptConf =>
-          er.subflatMap(v =>
-            c.enrichment(false, jsAllowedJavaClasses)
-              .map(e => v.copy(javascriptScript = v.javascriptScript :+ e))
-          )
-        case c: RefererParserConf =>
-          for {
-            enrichment <- c.enrichment[IO]
-            registry   <- er
-          } yield registry.copy(refererParser = enrichment.some)
-        case c: UaParserConf =>
-          for {
-            enrichment <- c.enrichment[IO]
-            registry   <- er
-          } yield registry.copy(uaParser = enrichment.some)
-        case c: UserAgentUtilsConf => er.map(_.copy(userAgentUtils = c.enrichment.some))
-        case c: WeatherConf =>
-          for {
-            enrichment <- c.enrichment[IO]
-            registry   <- er
-          } yield registry.copy(weather = enrichment.some)
-        case c: YauaaConf          => er.map(_.copy(yauaa = c.enrichment.some))
-        case c: CrossNavigationConf => er.map(_.copy(crossNavigation = c.enrichment.some))
-        case c: BotDetectionConf   => er.map(_.copy(botDetection = c.enrichment.some))
-        case c: EventSpecConf =>
-          for {
-            enrichment <- c.enrichment[IO]
-            registry   <- er
-          } yield registry.copy(eventSpec = enrichment.some)
+      if (loadedEnrichments.nonEmpty) {
+        logger.info(s"Enabled enrichments: ${loadedEnrichments.mkString(", ")}")
+      } else {
+        logger.info(s"No enrichments enabled")
       }
     }
 

@@ -20,8 +20,9 @@ import com.snowplowanalytics.iglu.client.IgluCirceClient
 import com.snowplowanalytics.iglu.client.resolver.Resolver
 import com.snowplowanalytics.iglu.client.resolver.registries.{JavaNetRegistryLookup, Registry}
 import com.snowplowanalytics.iglu.core.{SchemaKey, SchemaVer}
+import cats.effect.std.AtomicCell
+import com.snowplowanalytics.snowplow.micro.blob.AssetRefresher
 import com.snowplowanalytics.snowplow.badrows.Processor
-import com.snowplowanalytics.snowplow.enrich.common.enrichments.EnrichmentRegistry
 import com.snowplowanalytics.snowplow.enrich.common.enrichments.registry.JavascriptScriptEnrichment
 import com.snowplowanalytics.snowplow.enrich.common.utils.OptionIor
 import com.snowplowanalytics.snowplow.micro.Configuration.OutputFormat
@@ -166,12 +167,18 @@ class EventSinkSpec extends CatsResource[IO, EventSink] with SpecificationLike {
       enrichConfig <- Resource.eval(Configuration.loadEnrichConfig(None).value.map(_.getOrElse(throw new IllegalArgumentException("Can't read defaults from Enrich config"))))
       igluClient <- Resource.eval(IgluCirceClient.fromResolver[IO](Resolver[IO](List(Registry.IgluCentral), None), 500, enrichConfig.maxJsonDepth))
       jsEnrichment <- Resource.eval(buildJSEnrichment())
-      enrichmentRegistry = new EnrichmentRegistry[IO](javascriptScript = List(jsEnrichment))
+      // The JavaScript enrichment is not asset-backed, so it lives as a plain field and the asset
+      // refresher has no groups to refresh.
+      assetGroups <- Resource.eval(AtomicCell[IO].of(List.empty[AssetRefresher.EnrichmentAssetGroup[IO]]))
+      managedRegistry = ManagedEnrichmentRegistry[IO](
+        javascriptScript = List(jsEnrichment),
+        assetRefresher = new AssetRefresher(assetGroups)
+      )
       processor = Processor(BuildInfo.name, BuildInfo.version)
       lookup = JavaNetRegistryLookup.ioLookupInstance[IO]
       httpClient <- EmberClientBuilder.default[IO].build
       storage = new InMemoryStorage()
-    } yield new EventSink(igluClient, lookup, enrichmentRegistry, OutputFormat.None, None, processor, enrichConfig, httpClient, storage)
+    } yield new EventSink(igluClient, lookup, managedRegistry, OutputFormat.None, None, processor, enrichConfig, httpClient, storage)
   }
 
   private def buildJSEnrichment(): IO[JavascriptScriptEnrichment] = {

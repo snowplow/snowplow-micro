@@ -22,6 +22,7 @@ object Dependencies {
 
     val http4s = "0.23.33"
     val decline     = "2.4.1"
+    val catsRetry   = "3.1.3"
     val slf4j       = "2.0.17"
     val doobie      = "1.0.0-RC10"
     val postgresql  = "42.7.8"
@@ -41,10 +42,11 @@ object Dependencies {
   val snowplowCommonEnrich    = "com.snowplowanalytics" %% "snowplow-common-enrich"                % V.snowplowCommonEnrich
   val snowplowAnalyticsSdk    = "com.snowplowanalytics" %% "snowplow-scala-analytics-sdk"          % V.snowplowAnalyticsSdk
   
-  val http4sCirce  = "org.http4s"    %% "http4s-circe"        % V.http4s
-  val http4sClient = "org.http4s"    %% "http4s-ember-client" % V.http4s
-  val decline      = "com.monovore"  %% "decline-effect"      % V.decline
-  val slf4jSimple  = "org.slf4j"     %  "slf4j-simple"        % V.slf4j
+  val http4sCirce  = "org.http4s"       %% "http4s-circe"        % V.http4s
+  val http4sClient = "org.http4s"       %% "http4s-ember-client" % V.http4s
+  val decline      = "com.monovore"     %% "decline-effect"      % V.decline
+  val catsRetry    = "com.github.cb372" %% "cats-retry"          % V.catsRetry
+  val slf4jSimple  = "org.slf4j"        %  "slf4j-simple"        % V.slf4j
 
   // doobie
   val doobieCore           = "org.tpolecat" %% "doobie-core"           % V.doobie

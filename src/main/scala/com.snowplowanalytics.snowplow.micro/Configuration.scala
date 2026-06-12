@@ -154,7 +154,8 @@ object Configuration {
     adaptersSchemas: EnrichAdaptersSchemas,
     maxJsonDepth: Int,
     validation: EnrichValidation,
-    jsAllowedJavaClasses: Set[String]
+    jsAllowedJavaClasses: Set[String],
+    assetsUpdatePeriod: FiniteDuration
   )
 
   final case class IgluResources(resolver: Resolver[IO], client: IgluCirceClient[IO])
