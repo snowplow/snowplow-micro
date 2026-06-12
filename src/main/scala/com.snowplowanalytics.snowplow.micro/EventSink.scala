@@ -45,7 +45,7 @@ import java.time.Instant
  */
 final class EventSink(igluClient: IgluCirceClient[IO],
                       registryLookup: RegistryLookup[IO],
-                      enrichmentRegistry: EnrichmentRegistry[IO],
+                      managedRegistry: ManagedEnrichmentRegistry[IO],
                       outputFormat: OutputFormat,
                       destination: Option[Uri],
                       processor: Processor,
@@ -62,7 +62,11 @@ final class EventSink(igluClient: IgluCirceClient[IO],
   override def targetBytes: IO[Int] = IO.pure(maxBytes)
 
   override def storeRawEvents(events: List[Array[Byte]]): IO[Unit] = {
-    events.traverse(collectEventsFromThriftBytes).map { results =>
+    // A single snapshot is held for the whole batch so that, while these events are in-flight, the
+    // enrichments cannot be hot-swapped from under us by a concurrent asset refresh.
+    managedRegistry.snapshot.use { enrichmentRegistry =>
+      events.traverse(collectEventsFromThriftBytes(enrichmentRegistry, _))
+    }.map { results =>
       results.foldLeft((List.empty[GoodEvent], List.empty[BadEvent])) {
         case ((good, bad), (g, b)) => (g ::: good, b ::: bad)
       }
@@ -93,14 +97,17 @@ final class EventSink(igluClient: IgluCirceClient[IO],
    * validate them and return the results for batch processing.
    * A `CollectorPayload` can contain several events.
    */
-  private[micro] def collectEventsFromThriftBytes(thriftBytes: Array[Byte]): IO[(List[GoodEvent], List[BadEvent])] =
+  private[micro] def collectEventsFromThriftBytes(
+    enrichmentRegistry: EnrichmentRegistry[IO],
+    thriftBytes: Array[Byte]
+  ): IO[(List[GoodEvent], List[BadEvent])] =
     ThriftLoader.toCollectorPayload(thriftBytes, processor, Instant.now()) match {
       case Validated.Valid(collectorPayload) =>
         adapterRegistry.toRawEvents(collectorPayload, igluClient, processor, registryLookup, enrichConfig.maxJsonDepth, Instant.now()).flatMap {
           case Validated.Valid(rawEvents) =>
             rawEvents.toList.foldLeftM((Nil, Nil): (List[GoodEvent], List[BadEvent])) {
               case ((good, bad), rawEvent) =>
-                validateEvent(rawEvent).map {
+                validateEvent(enrichmentRegistry, rawEvent).map {
                   case OptionIor.Right(goodEvent) =>
                     logger.info(s"GOOD ${formatEvent(goodEvent)}")
                     (goodEvent :: good, bad)
@@ -133,6 +140,12 @@ final class EventSink(igluClient: IgluCirceClient[IO],
    *   or error if the event couldn't be validated.
    */
   private[micro] def validateEvent(rawEvent: RawEvent): IO[OptionIor[(List[String], BadRow), GoodEvent]] =
+    managedRegistry.snapshot.use(validateEvent(_, rawEvent))
+
+  private def validateEvent(
+    enrichmentRegistry: EnrichmentRegistry[IO],
+    rawEvent: RawEvent
+  ): IO[OptionIor[(List[String], BadRow), GoodEvent]] =
     EnrichmentManager.enrichEvent[IO](
         enrichmentRegistry,
         igluClient,
