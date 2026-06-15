@@ -33,9 +33,9 @@ object Dependencies {
 
     // cloud SDKs
     val awsSdk           = "2.42.26"
-    val gcpSdk           = "2.64.1"
-    val azureStorageBlob = "12.33.2"
-    val azureIdentity    = "1.18.2"
+    val gcpSdk           = "2.69.0"
+    val azureStorageBlob = "12.33.4"
+    val azureIdentity    = "1.18.4"
   }
 
   val snowplowStreamCollector = "com.snowplowanalytics" %% "snowplow-stream-collector-http4s-core" % V.snowplowStreamCollector
