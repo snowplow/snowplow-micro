@@ -29,6 +29,7 @@ import io.circe.syntax._
 import org.joda.time.DateTime
 import org.slf4j.LoggerFactory
 import com.snowplowanalytics.snowplow.micro.Configuration.{EnrichConfig, OutputFormat}
+import com.snowplowanalytics.snowplow.micro.storage.EventStorage
 import org.http4s.client.Client
 import org.http4s.{Method, Request, Uri}
 import org.http4s.headers.`Content-Type`

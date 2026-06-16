@@ -13,6 +13,7 @@ package com.snowplowanalytics.snowplow.micro
 import cats.effect.unsafe.implicits.global
 import cats.effect.{IO, Resource}
 import org.specs2.mutable.Specification
+import com.snowplowanalytics.snowplow.micro.storage.PostgresqlStorage
 import io.circe.Json
 import java.time.{Duration, Instant}
 import scala.concurrent.duration.DurationInt

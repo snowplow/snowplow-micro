@@ -22,6 +22,7 @@ import com.snowplowanalytics.iglu.client.resolver.registries.{JavaNetRegistryLoo
 import com.snowplowanalytics.iglu.core.{SchemaKey, SchemaVer}
 import cats.effect.std.AtomicCell
 import com.snowplowanalytics.snowplow.micro.blob.AssetRefresher
+import com.snowplowanalytics.snowplow.micro.storage.InMemoryStorage
 import com.snowplowanalytics.snowplow.badrows.Processor
 import com.snowplowanalytics.snowplow.enrich.common.enrichments.registry.JavascriptScriptEnrichment
 import com.snowplowanalytics.snowplow.enrich.common.utils.OptionIor

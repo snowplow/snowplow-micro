@@ -22,6 +22,7 @@ import com.snowplowanalytics.snowplow.enrich.common.adapters.RawEvent
 import com.snowplowanalytics.snowplow.enrich.common.loaders.CollectorPayload
 import com.snowplowanalytics.snowplow.micro.Configuration.AuthConfig
 import com.snowplowanalytics.snowplow.micro.Routing._
+import com.snowplowanalytics.snowplow.micro.storage.{EventStorage, InMemoryStorage, NoStorage, PostgresqlStorage}
 import io.circe.generic.semiauto.{deriveDecoder, deriveEncoder}
 import io.circe.syntax.EncoderOps
 import io.circe.{Decoder, Encoder}
