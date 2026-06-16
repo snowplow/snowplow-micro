@@ -1,3 +1,9 @@
+Version 4.3.0 (2026-06-17)
+--------------------------
+Bump dependencies to fix CVEs (#204)
+Move storage classes to their own package (#203)
+Add periodic assets refresh for enrichments (#203)
+
 Version 4.2.1 (2026-06-08)
 --------------------------
 Add user_id to searchable columns and enable auto-refresh (#201)
