@@ -25,6 +25,7 @@ import com.snowplowanalytics.snowplow.enrich.common.utils.HttpClient
 
 import com.snowplowanalytics.snowplow.micro.Configuration.MicroConfig
 import com.snowplowanalytics.snowplow.micro.blob.BlobUtils
+import com.snowplowanalytics.snowplow.micro.storage.EventStorage
 import org.http4s.ember.client.EmberClientBuilder
 import org.http4s.client.Client
 import org.typelevel.log4cats.Logger

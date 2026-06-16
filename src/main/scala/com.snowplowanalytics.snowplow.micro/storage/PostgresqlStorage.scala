@@ -8,10 +8,11 @@
  * OF THE SOFTWARE, YOU AGREE TO THE TERMS OF SUCH LICENSE AGREEMENT.
  */
 
-package com.snowplowanalytics.snowplow.micro
+package com.snowplowanalytics.snowplow.micro.storage
 
 import cats.effect.{IO, Resource}
 import cats.implicits._
+import com.snowplowanalytics.snowplow.micro._
 import com.snowplowanalytics.snowplow.micro.model.ColumnStatsResponse
 import doobie._
 import doobie.implicits._

@@ -15,6 +15,7 @@ import cats.effect.unsafe.implicits.global
 import org.specs2.mutable.Specification
 import org.joda.time.DateTime
 
+import com.snowplowanalytics.snowplow.micro.storage.InMemoryStorage
 import com.snowplowanalytics.snowplow.enrich.common.loaders.CollectorPayload
 import com.snowplowanalytics.snowplow.analytics.scalasdk.Event
 

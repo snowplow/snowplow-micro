@@ -14,6 +14,7 @@ import cats.effect.{IO, Resource}
 import cats.effect.unsafe.implicits.global
 import org.specs2.mutable.Specification
 import org.specs2.specification.core.Fragment
+import com.snowplowanalytics.snowplow.micro.storage.EventStorage
 import io.circe.Json
 import io.circe.parser.parse
 
