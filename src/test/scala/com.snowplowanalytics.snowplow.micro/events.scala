@@ -16,7 +16,7 @@ import java.util.UUID
 
 import org.apache.thrift.TSerializer
 
-import com.snowplowanalytics.snowplow.CollectorPayload.thrift.model1.{CollectorPayload => tCollectorPayload}
+import com.snowplowanalytics.snowplow.collector.thrift.{CollectorPayload => tCollectorPayload}
 
 import com.snowplowanalytics.snowplow.enrich.common.adapters.RawEvent
 import com.snowplowanalytics.snowplow.enrich.common.loaders.CollectorPayload.{Api, Context, Source}
@@ -158,7 +158,7 @@ object events {
       ]
     }
     """
-    tCP.setBody(body)
+    tCP.setBody(body.getBytes("UTF-8"))
     tCP.setContentType("application/json")
 
     val ThriftSerializer = new ThreadLocal[TSerializer] {
