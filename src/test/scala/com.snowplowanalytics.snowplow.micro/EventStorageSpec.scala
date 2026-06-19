@@ -440,7 +440,7 @@ trait EventStorageFilteredEventsSpec {
         storageResource.use { storage =>
           for {
             _ <- storage.addToGood(List(GoodEvent1, GoodEvent2))
-            filter = EventsFilter("app_id", "test1")
+            filter = EventsFilter("app_id", List("test1"))
             request = EventsRequest(List(filter), None, None, None, 1, 10)
             result <- storage.getFilteredEvents(request)
           } yield {
@@ -454,8 +454,8 @@ trait EventStorageFilteredEventsSpec {
         storageResource.use { storage =>
           for {
             _ <- storage.addToGood(List(GoodEvent1, GoodEvent2))
-            contextFilter = EventsFilter("contexts_some_field", "test")
-            unstructFilter = EventsFilter("unstruct_event_some_field", "test")
+            contextFilter = EventsFilter("contexts_some_field", List("test"))
+            unstructFilter = EventsFilter("unstruct_event_some_field", List("test"))
             request = EventsRequest(List(contextFilter, unstructFilter), None, None, None, 1, 10)
             result <- storage.getFilteredEvents(request)
           } yield {
@@ -509,7 +509,7 @@ trait EventStorageFilteredEventsSpec {
         storageResource.use { storage =>
           for {
             _ <- storage.addToGood(List(GoodEvent1, GoodEvent2))
-            emptyFilter = EventsFilter("app_id", "")
+            emptyFilter = EventsFilter("app_id", List(""))
             request = EventsRequest(List(emptyFilter), None, None, None, 1, 10)
             result <- storage.getFilteredEvents(request)
           } yield {
@@ -524,8 +524,8 @@ trait EventStorageFilteredEventsSpec {
         storageResource.use { storage =>
           for {
             _ <- storage.addToGood(List(GoodEvent1.copy(event = GoodEvent1.event.copy(app_id = Some("testapp")))))
-            matchFilter = EventsFilter("app_id", "testapp")
-            noMatchFilter = EventsFilter("app_id", "other")
+            matchFilter = EventsFilter("app_id", List("testapp"))
+            noMatchFilter = EventsFilter("app_id", List("other"))
             matchRequest = EventsRequest(List(matchFilter), None, None, None, 1, 10)
             noMatchRequest = EventsRequest(List(noMatchFilter), None, None, None, 1, 10)
             matchResult <- storage.getFilteredEvents(matchRequest)
@@ -545,8 +545,8 @@ trait EventStorageFilteredEventsSpec {
         storageResource.use { storage =>
           for {
             _ <- storage.addToGood(List(event1Modified, event2Modified, event3Modified))
-            appFilter = EventsFilter("app_id", "app1")
-            eventFilter = EventsFilter("event_name", "click")
+            appFilter = EventsFilter("app_id", List("app1"))
+            eventFilter = EventsFilter("event_name", List("click"))
             request = EventsRequest(List(appFilter, eventFilter), None, None, None, 1, 10)
             result <- storage.getFilteredEvents(request)
           } yield {
@@ -556,6 +556,72 @@ trait EventStorageFilteredEventsSpec {
           }
         }.unsafeRunSync()
       }
+
+      "should filter by multiple values in a single filter (OR within column)" >> {
+        val event1Modified = GoodEvent1.copy(event = GoodEvent1.event.copy(app_id = Some("app1")))
+        val event2Modified = GoodEvent2.copy(event = GoodEvent2.event.copy(app_id = Some("app2")))
+        val event3Modified = GoodEvent3.copy(event = GoodEvent3.event.copy(app_id = Some("app3")))
+
+        storageResource.use { storage =>
+          for {
+            _ <- storage.addToGood(List(event1Modified, event2Modified, event3Modified))
+            filter = EventsFilter("app_id", List("app1", "app3"))
+            request = EventsRequest(List(filter), None, None, None, 1, 10)
+            result <- storage.getFilteredEvents(request)
+          } yield {
+            result.events must have size(2)
+            result.totalItems must_== 2
+          }
+        }.unsafeRunSync()
+      }
+
+      "should return no events when multi-value filter matches nothing" >> {
+        storageResource.use { storage =>
+          for {
+            _ <- storage.addToGood(List(GoodEvent1, GoodEvent2))
+            filter = EventsFilter("app_id", List("nonexistent1", "nonexistent2"))
+            request = EventsRequest(List(filter), None, None, None, 1, 10)
+            result <- storage.getFilteredEvents(request)
+          } yield {
+            result.events must have size(0)
+            result.totalItems must_== 0
+          }
+        }.unsafeRunSync()
+      }
+
+      "should return all events when filter values list is empty" >> {
+        storageResource.use { storage =>
+          for {
+            _ <- storage.addToGood(List(GoodEvent1, GoodEvent2))
+            filter = EventsFilter("app_id", List.empty)
+            request = EventsRequest(List(filter), None, None, None, 1, 10)
+            result <- storage.getFilteredEvents(request)
+          } yield {
+            result.events must have size(2)
+            result.totalItems must_== 2
+          }
+        }.unsafeRunSync()
+      }
+
+      "should combine multi-value filter with validEvents flag" >> {
+        val event1Modified = GoodEvent1.copy(event = GoodEvent1.event.copy(app_id = Some("app1")))
+        val event2Modified = GoodEvent2.copy(event = GoodEvent2.event.copy(app_id = Some("app1")), incomplete = true)
+        val event3Modified = GoodEvent3.copy(event = GoodEvent3.event.copy(app_id = Some("app2")))
+
+        storageResource.use { storage =>
+          for {
+            _ <- storage.addToGood(List(event1Modified, event2Modified, event3Modified))
+            filter = EventsFilter("app_id", List("app1"))
+            request = EventsRequest(List(filter), Some(true), None, None, 1, 10)
+            result <- storage.getFilteredEvents(request)
+          } yield {
+            // app1 AND valid only = just event1Modified
+            result.events must have size(1)
+            result.totalItems must_== 1
+          }
+        }.unsafeRunSync()
+      }
+
     }
   }
 }

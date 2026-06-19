@@ -302,6 +302,22 @@ class InMemoryStorageSpec extends Specification with EventStorageTimelineSpec wi
   columnStatsTests(Resource.eval(IO(emptyCache())), "InMemoryStorage")
   filteredEventsTests(Resource.eval(IO(emptyCache())), "InMemoryStorage")
 
+  "InMemoryStorage specific filter behavior" >> {
+    "should match filter values case-insensitively" >> {
+      val event = GoodEvent1.copy(event = GoodEvent1.event.copy(app_id = Some("MyApp")))
+      Resource.eval(IO(emptyCache())).use { storage =>
+        for {
+          _ <- storage.addToGood(List(event))
+          filter = EventsFilter("app_id", List("myapp"))
+          request = EventsRequest(List(filter), None, None, None, 1, 10)
+          result <- storage.getFilteredEvents(request)
+        } yield {
+          result.events must have size(1)
+        }
+      }.unsafeRunSync()
+    }
+  }
+
   "InMemoryStorage specific column stats behavior" >> {
     "should mark complex columns as non-sortable, non-filterable" >> {
       Resource.eval(IO(emptyCache())).use { storage =>

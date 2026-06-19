@@ -11,7 +11,6 @@ import { hasFailureData } from './event-utils'
 
 export type EventColumnMeta = {
   eventStatusFilter?: boolean
-  useAutocomplete?: boolean
   distinctValues?: string[]
 }
 
@@ -104,13 +103,11 @@ export function generateColumns(
     const isSortable = stats?.sortable ?? false
     const isFilterable = stats?.filterable ?? false
     const distinctValues = stats?.values ?? []
-    const useAutocomplete = distinctValues.length > 0
 
     const columnDef: EventColumnDef = {
       id: fieldName,
       accessorFn: columnMetadata.accessor,
       meta: {
-        useAutocomplete,
         distinctValues,
       },
       header: ({ column }) => {

@@ -36,7 +36,7 @@ export type ColumnStatsResponse = Record<string, ColumnStats>
 
 export type EventsFilter = {
   column: string
-  value: string
+  values: string[]
 }
 
 export type TimeRange = {

@@ -158,7 +158,7 @@ private[micro] class InMemoryStorage extends EventStorage {
         .map(_.event.toJson(lossy = true))
         .filter { eventJson =>
           request.filters.filterNot(f => EventStorage.isComplexColumn(f.column)).forall { filter =>
-            applyFilter(eventJson, filter.column, filter.value)
+            applyFilter(eventJson, filter)
           }
         }
 
@@ -214,11 +214,12 @@ private[micro] object InMemoryStorage {
     }
   }
 
-  private[micro] def applyFilter(eventJson: Json, column: String, filterValue: String): Boolean = {
-    if (filterValue.isEmpty) return true
+  private[micro] def applyFilter(eventJson: Json, filter: EventsFilter): Boolean = {
+    val filterValues = filter.values.filter(_.nonEmpty)
+    if (filterValues.isEmpty) return true
 
-    getColumnValue(eventJson, column) match {
-      case Some(value) => value.toLowerCase.contains(filterValue.toLowerCase)
+    getColumnValue(eventJson, filter.column) match {
+      case Some(value) => filterValues.exists(fv => value.equalsIgnoreCase(fv))
       case None => false
     }
   }

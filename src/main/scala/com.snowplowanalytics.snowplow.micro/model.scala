@@ -73,7 +73,7 @@ object model {
 /** Server-side filtering, sorting, and pagination for /micro/events endpoint. */
 final case class EventsFilter(
   column: String,
-  value: String
+  values: List[String]
 )
 
 final case class EventsRequest(

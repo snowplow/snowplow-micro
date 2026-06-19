@@ -21,7 +21,6 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 
@@ -32,7 +31,7 @@ import {
 } from '@/utils/column-generation'
 import type { Event, ColumnStats } from '@/services/api'
 import { type ColumnMetadata } from '@/utils/column-metadata'
-import { ColumnAutocomplete } from '@/components/ColumnAutocomplete'
+import { MultiSelectFilter } from '@/components/MultiSelectFilter'
 import { StatusDropdown } from '@/components/StatusDropdown'
 
 type DataTableProps = {
@@ -158,43 +157,21 @@ export function DataTable({
                               }}
                             />
                           ) : header.column.getCanFilter() ? (
-                            (header.column.columnDef.meta as EventColumnMeta)
-                              ?.useAutocomplete ? (
-                              <ColumnAutocomplete
-                                value={
-                                  (header.column.getFilterValue() as string) ??
-                                  ''
-                                }
-                                onChange={(value) => {
-                                  header.column.setFilterValue(
-                                    value === '' ? undefined : value
-                                  )
-                                }}
-                                options={
-                                  (
-                                    header.column.columnDef
-                                      .meta as EventColumnMeta
-                                  )?.distinctValues || []
-                                }
-                                placeholder="Filter..."
-                              />
-                            ) : (
-                              <Input
-                                placeholder="Filter..."
-                                value={
-                                  (header.column.getFilterValue() as string) ??
-                                  ''
-                                }
-                                onChange={(e) => {
-                                  const value = e.target.value
-                                  header.column.setFilterValue(
-                                    value === '' ? undefined : value
-                                  )
-                                }}
-                                className="text-xs font-light"
-                                style={{ width: '100px' }}
-                              />
-                            )
+                            <MultiSelectFilter
+                              options={
+                                (header.column.columnDef.meta as EventColumnMeta)
+                                  ?.distinctValues || []
+                              }
+                              selectedValues={
+                                (header.column.getFilterValue() as string[]) ?? []
+                              }
+                              onChange={(values) => {
+                                header.column.setFilterValue(
+                                  values.length === 0 ? undefined : values
+                                )
+                              }}
+                              placeholder="Filter..."
+                            />
                           ) : null}
                         </TableHead>
                       ))}

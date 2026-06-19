@@ -10,6 +10,7 @@
 
 package com.snowplowanalytics.snowplow.micro.storage
 
+import cats.data.NonEmptyList
 import cats.effect.{IO, Resource}
 import cats.implicits._
 import com.snowplowanalytics.snowplow.micro._
@@ -187,10 +188,11 @@ private[micro] class PostgresqlStorage(xa: Transactor[IO]) extends EventStorage 
     // Only filter on indexed columns (PostgreSQL mode doesn't support JSON column filtering yet)
     val columnFilters = request.filters
       .filter(f => INDEXED_COLUMNS.contains(f.column))
-      .filter(_.value.nonEmpty) // Skip empty filter values
-      .map { filter =>
+      .flatMap { filter =>
         val frCol = Fragment.const(filter.column)
-        fr"AND $frCol = ${filter.value}"
+        NonEmptyList.fromList(filter.values.filter(_.nonEmpty)).map { nel =>
+          fr"AND" ++ Fragments.in(frCol, nel)
+        }
       }
 
     val allConditions = whereConditions ++ columnFilters

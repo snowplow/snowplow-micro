@@ -119,7 +119,7 @@ function App() {
 
     const filters: EventsFilter[] = regularFilters.map((filter) => ({
       column: filter.id,
-      value: String(filter.value),
+      values: Array.isArray(filter.value) ? filter.value as string[] : [String(filter.value)],
     }))
 
     // Map status filter to validEvents field
@@ -313,7 +313,11 @@ function App() {
 
     if (columnFilters.length > 0) {
       columnFilters.forEach((filter) => {
-        filters.push(`${filter.id}: ${filter.value}`)
+        if (Array.isArray(filter.value)) {
+          filters.push(`${filter.id}: ${(filter.value as string[]).join(', ')}`)
+        } else {
+          filters.push(`${filter.id}: ${filter.value}`)
+        }
       })
     }
 
