@@ -29,11 +29,16 @@ import {
   FilterX,
   MoreVertical,
   TimerReset,
+  Link,
+  Check,
 } from 'lucide-react'
 import { type ColumnFiltersState, type SortingState } from '@tanstack/react-table'
+import { parseViewUrl, serializeViewUrl } from '@/utils/view-url'
 
 function App() {
   const { isAuthenticated, isLoading: authIsLoading, error, getAccessToken } = useAuth()
+  const [urlState] = useState(() => parseViewUrl())
+  const isUrlMode = urlState !== null
   const [eventData, setEventData] = useState<EventsResponse>({
     events: [],
     totalPages: 0,
@@ -52,8 +57,12 @@ function App() {
     value: any
     title: string
   } | null>(null)
-  const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([])
-  const [selectedTimeBucket, setSelectedTimeBucket] = useState<string | null>(null)
+  const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>(
+    urlState?.filters ?? []
+  )
+  const [selectedTimeBucket, setSelectedTimeBucket] = useState<string | null>(
+    urlState?.timeBucket ?? null
+  )
   const [lastRefreshTime, setLastRefreshTime] = useState<Date | null>(null)
   const [showActionsMenu, setShowActionsMenu] = useState(false)
   const [columnStats, setColumnStats] = useState<Record<string, ColumnStats>>(
@@ -103,6 +112,8 @@ function App() {
       scrollToLastColumn()
       updateColumnStats(columnNames)
     },
+    initialColumns: urlState?.columns,
+    persistToStorage: !isUrlMode,
   })
 
   // Set initial sorting when collector_tstamp is available
@@ -359,6 +370,24 @@ function App() {
     }
   }, [autoRefresh])
 
+  // Sync state to URL in URL mode
+  const selectedColumnNames = selectedColumns.map((col) => col.name)
+  useEffect(() => {
+    if (!isUrlMode) return
+    const url = serializeViewUrl(selectedColumns, columnFilters, selectedTimeBucket)
+    const { pathname, search } = new URL(url)
+    window.history.replaceState({}, '', pathname + search)
+  }, [isUrlMode, selectedColumnNames.join(','), columnFilters, selectedTimeBucket])
+
+  // "Copied!" feedback state
+  const [copied, setCopied] = useState(false)
+  const copyViewUrl = () => {
+    const url = serializeViewUrl(selectedColumns, columnFilters, selectedTimeBucket)
+    navigator.clipboard.writeText(url)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+
   // Initial load - only when authentication is ready
   useEffect(() => {
     if (isAuthenticated && !authIsLoading) {
@@ -478,6 +507,25 @@ function App() {
               <Columns3Cog className="mr-2 h-4 w-4" />
               Pick columns
             </Button>
+            <TooltipProvider>
+              <Tooltip delayDuration={0}>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={copyViewUrl}
+                  >
+                    {copied
+                      ? <><Check className="mr-2 h-4 w-4" />Copied!</>
+                      : <><Link className="mr-2 h-4 w-4" />Copy view URL</>
+                    }
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  Copies selected columns and applied filters
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
             <div className="relative">
               <Button
                 variant="outline"

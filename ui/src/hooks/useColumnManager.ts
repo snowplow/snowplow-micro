@@ -45,6 +45,8 @@ type UseColumnManagerProps = {
   availableColumnNames: string[]
   setColumnFilters: OnChangeFn<ColumnFiltersState>
   onColumnAdded?: (columnNames: string[]) => void
+  initialColumns?: string[]
+  persistToStorage?: boolean
 }
 
 type UseColumnManagerReturn = {
@@ -59,14 +61,12 @@ export function useColumnManager({
   availableColumnNames,
   setColumnFilters,
   onColumnAdded,
+  initialColumns,
+  persistToStorage = true,
 }: UseColumnManagerProps): UseColumnManagerReturn {
   const [selectedColumnNames, setSelectedColumnNames] = useState<string[]>(
-    loadSelectedColumns()
+    initialColumns ?? loadSelectedColumns()
   )
-
-  useEffect(() => {
-    saveSelectedColumns(selectedColumnNames)
-  }, [selectedColumnNames])
 
   const selectedColumns = useMemo(() => {
     return selectedColumnNames.map(createColumnMetadata)
@@ -99,10 +99,11 @@ export function useColumnManager({
       const updated = selectedColumnNames.filter((c) => c != fieldName)
       setColumnFilters((filters) => filters.filter((f) => f.id !== fieldName))
       setSelectedColumnNames(updated)
+      if (persistToStorage) saveSelectedColumns(updated)
     } else {
       const updated = [...selectedColumnNames, fieldName]
       setSelectedColumnNames(updated)
-      // Notify that a column was added
+      if (persistToStorage) saveSelectedColumns(updated)
       onColumnAdded?.(updated)
     }
   }
@@ -112,12 +113,14 @@ export function useColumnManager({
     const column = reordered.splice(fromIndex, 1)[0]
     reordered.splice(toIndex, 0, column)
     setSelectedColumnNames(reordered)
+    if (persistToStorage) saveSelectedColumns(reordered)
   }
 
   const resetToDefaults = () => {
     const removedColumns = selectedColumnNames.filter(col => !DEFAULT_COLUMNS.includes(col))
     setColumnFilters((filters) => filters.filter((f) => !removedColumns.includes(f.id)))
     setSelectedColumnNames([...DEFAULT_COLUMNS])
+    if (persistToStorage) saveSelectedColumns([...DEFAULT_COLUMNS])
   }
 
   return {
