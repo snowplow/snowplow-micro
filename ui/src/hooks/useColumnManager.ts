@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo } from 'react'
 
 import type { ColumnFiltersState, OnChangeFn } from '@tanstack/react-table'
 import { type ColumnMetadata, createColumnMetadata } from '@/utils/column-metadata'
