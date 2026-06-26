@@ -80,9 +80,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         if (handleRedirect) {
           try {
-            await client.handleRedirectCallback()
-            // Clean up the URL after handling callback
-            window.history.replaceState({}, document.title, window.location.pathname)
+            const result = await client.handleRedirectCallback()
+            // Restore the original query string (e.g. view URL params) if it was saved before login
+            const returnSearch = result.appState?.returnSearch ?? ''
+            window.history.replaceState({}, document.title, window.location.pathname + returnSearch)
           } catch (error) {
             console.error('Failed to handle Auth0 callback:', error)
             setError('Authentication callback failed')
@@ -99,7 +100,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         // If not authenticated and not handling a redirect, redirect to login
         if (!authenticated && !handleRedirect) {
-          await client.loginWithRedirect()
+          await client.loginWithRedirect({
+            appState: { returnSearch: window.location.search },
+          })
           return
         }
 
