@@ -44,7 +44,7 @@ function loadSelectedColumns(): string[] {
 type UseColumnManagerProps = {
   availableColumnNames: string[]
   setColumnFilters: OnChangeFn<ColumnFiltersState>
-  onColumnAdded?: (columnNames: string[]) => void
+  onColumnAdded?: () => void
   initialColumns?: string[]
   persistToStorage?: boolean
 }
@@ -104,7 +104,7 @@ export function useColumnManager({
       const updated = [...selectedColumnNames, fieldName]
       setSelectedColumnNames(updated)
       if (persistToStorage) saveSelectedColumns(updated)
-      onColumnAdded?.(updated)
+      onColumnAdded?.()
     }
   }
 
