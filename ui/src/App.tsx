@@ -36,7 +36,49 @@ import { type ColumnFiltersState, type SortingState } from '@tanstack/react-tabl
 import { parseViewUrl, serializeViewUrl } from '@/utils/view-url'
 
 function App() {
-  const { isAuthenticated, isLoading: authIsLoading, error, getAccessToken } = useAuth()
+  const { isAuthenticated, isLoading: authIsLoading, error } = useAuth()
+
+  // Show loading screen while auth is initializing
+  if (authIsLoading) {
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <div className="text-center">
+          <RefreshCw className="h-8 w-8 animate-spin mx-auto mb-4" />
+          <p>Loading...</p>
+        </div>
+      </div>
+    )
+  }
+
+  // Show error screen if auth failed
+  if (error) {
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <div className="text-center">
+          <p className="text-red-600 mb-4">Authentication Error: {error}</p>
+          <Button onClick={() => window.location.reload()}>Retry</Button>
+        </div>
+      </div>
+    )
+  }
+
+  // Only render the dashboard when authenticated
+  if (!isAuthenticated) {
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <div className="text-center">
+          <p>Redirecting to login...</p>
+        </div>
+      </div>
+    )
+  }
+
+  // Dashboard mounts only after auth is settled and OAuth params are cleaned from the URL
+  return <Dashboard />
+}
+
+function Dashboard() {
+  const { getAccessToken } = useAuth()
   const [urlState] = useState(() => parseViewUrl())
   const isUrlMode = urlState !== null
   const [eventData, setEventData] = useState<EventsResponse>({
@@ -108,9 +150,8 @@ function App() {
   } = useColumnManager({
     availableColumnNames,
     setColumnFilters,
-    onColumnAdded: (columnNames) => {
+    onColumnAdded: () => {
       scrollToLastColumn()
-      updateColumnStats(columnNames)
     },
     initialColumns: urlState?.columns,
     persistToStorage: !isUrlMode,
@@ -337,14 +378,14 @@ function App() {
 
   // Debounced filter/sort/page changes
   useEffect(() => {
-    if (!lastRefreshTime || !isAuthenticated) return
+    if (!lastRefreshTime) return
 
     const timeoutId = setTimeout(() => {
       fetchEventsWithFilters()
     }, 400)
 
     return () => clearTimeout(timeoutId)
-  }, [columnFilters, selectedTimeBucket, currentPage, sorting, isAuthenticated])
+  }, [columnFilters, selectedTimeBucket, currentPage, sorting])
 
   // Keep refreshAllDataRef up to date so the interval always calls the latest version
   useEffect(() => {
@@ -379,6 +420,12 @@ function App() {
     window.history.replaceState({}, '', pathname + search)
   }, [isUrlMode, selectedColumnNames.join(','), columnFilters, selectedTimeBucket])
 
+  // Re-fetch column stats whenever selected columns change (after initial load)
+  useEffect(() => {
+    if (!lastRefreshTime) return
+    updateColumnStats(selectedColumnNames)
+  }, [selectedColumnNames.join(',')])
+
   // "Copied!" feedback state
   const [copied, setCopied] = useState(false)
   const copyViewUrl = () => {
@@ -388,47 +435,10 @@ function App() {
     setTimeout(() => setCopied(false), 2000)
   }
 
-  // Initial load - only when authentication is ready
+  // Initial load
   useEffect(() => {
-    if (isAuthenticated && !authIsLoading) {
-      refreshAllData()
-    }
-  }, [isAuthenticated, authIsLoading])
-
-  // Show loading screen while auth is initializing
-  if (authIsLoading) {
-    return (
-      <div className="flex items-center justify-center h-screen">
-        <div className="text-center">
-          <RefreshCw className="h-8 w-8 animate-spin mx-auto mb-4" />
-          <p>Loading...</p>
-        </div>
-      </div>
-    )
-  }
-
-  // Show error screen if auth failed
-  if (error) {
-    return (
-      <div className="flex items-center justify-center h-screen">
-        <div className="text-center">
-          <p className="text-red-600 mb-4">Authentication Error: {error}</p>
-          <Button onClick={() => window.location.reload()}>Retry</Button>
-        </div>
-      </div>
-    )
-  }
-
-  // Only render the app when authenticated
-  if (!isAuthenticated) {
-    return (
-      <div className="flex items-center justify-center h-screen">
-        <div className="text-center">
-          <p>Redirecting to login...</p>
-        </div>
-      </div>
-    )
-  }
+    refreshAllData()
+  }, [])
 
   return (
     <div className="flex flex-col h-screen min-w-0 bg-page-background">
