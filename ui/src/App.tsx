@@ -78,7 +78,7 @@ function App() {
 }
 
 function Dashboard() {
-  const { getAccessToken } = useAuth()
+  const { getAccessToken, authEnabled } = useAuth()
   const [urlState] = useState(() => parseViewUrl())
   const isUrlMode = urlState !== null
   const [eventData, setEventData] = useState<EventsResponse>({
@@ -536,37 +536,39 @@ function Dashboard() {
                 </TooltipContent>
               </Tooltip>
             </TooltipProvider>
-            <div className="relative">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={(e) => {
-                  e.preventDefault()
-                  setShowActionsMenu(!showActionsMenu)
-                }}
-                onBlur={() => setShowActionsMenu(false)}
-              >
-                <MoreVertical className="h-4 w-4" />
-              </Button>
+            {!authEnabled && (
+              <div className="relative">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={(e) => {
+                    e.preventDefault()
+                    setShowActionsMenu(!showActionsMenu)
+                  }}
+                  onBlur={() => setShowActionsMenu(false)}
+                >
+                  <MoreVertical className="h-4 w-4" />
+                </Button>
 
-              {showActionsMenu && (
-                <div className="absolute top-full right-0 z-50 mt-1 bg-white border rounded-md shadow-lg whitespace-nowrap">
-                  <div className="p-1">
-                    <button
-                      className="px-2 py-1 text-xs font-normal text-left hover:bg-gray-100 rounded-sm flex items-center gap-2"
-                      onMouseDown={(e) => {
-                        e.preventDefault() // Prevent button blur
-                        resetEvents()
-                        setShowActionsMenu(false)
-                      }}
-                    >
-                      <Trash2 className="h-4 w-4 text-failure" />
-                      Delete all events
-                    </button>
+                {showActionsMenu && (
+                  <div className="absolute top-full right-0 z-50 mt-1 bg-white border rounded-md shadow-lg whitespace-nowrap">
+                    <div className="p-1">
+                      <button
+                        className="px-2 py-1 text-xs font-normal text-left hover:bg-gray-100 rounded-sm flex items-center gap-2"
+                        onMouseDown={(e) => {
+                          e.preventDefault() // Prevent button blur
+                          resetEvents()
+                          setShowActionsMenu(false)
+                        }}
+                      >
+                        <Trash2 className="h-4 w-4 text-failure" />
+                        Delete all events
+                      </button>
+                    </div>
                   </div>
-                </div>
-              )}
-            </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </div>
