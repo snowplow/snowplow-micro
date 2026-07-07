@@ -1,3 +1,7 @@
+Version 4.4.1 (2026-07-07)
+--------------------------
+Fix a conflict between OAuth and URL filters (#209)
+
 Version 4.4.0 (2026-06-26)
 --------------------------
 Add shareable view URLs with "Copy view URL" button (#207)
