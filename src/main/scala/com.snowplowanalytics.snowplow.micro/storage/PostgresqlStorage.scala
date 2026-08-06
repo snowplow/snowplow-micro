@@ -48,15 +48,16 @@ private[micro] class PostgresqlStorage(xa: Transactor[IO]) extends EventStorage 
         val domainUserid = goodEvent.event.domain_userid
         val vTracker = goodEvent.event.v_tracker
         val userId = goodEvent.event.user_id
-        (goodEvent.event.event_id.toString, goodEvent.event.collector_tstamp, eventJson, goodEvent.incomplete, appId, eventName, platform, nameTracker, domainUserid, vTracker, userId)
+        val networkUserid = goodEvent.event.network_userid
+        (goodEvent.event.event_id.toString, goodEvent.event.collector_tstamp, eventJson, goodEvent.incomplete, appId, eventName, platform, nameTracker, domainUserid, vTracker, userId, networkUserid)
       }
 
       val allColumns = eventJsons.map(EventStorage.extractColumnsFromEvent)
         .reduce(_.union(_)).toList
 
       val insertEventsProgram = {
-        val sql = "INSERT INTO events (event_id, timestamp, event_json, failed, app_id, event_name, platform, name_tracker, domain_userid, v_tracker, user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (event_id) DO NOTHING"
-        Update[(String, Instant, Json, Boolean, Option[String], Option[String], Option[String], Option[String], Option[String], Option[String], Option[String])](sql).updateMany(eventData)
+        val sql = "INSERT INTO events (event_id, timestamp, event_json, failed, app_id, event_name, platform, name_tracker, domain_userid, v_tracker, user_id, network_userid) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (event_id) DO NOTHING"
+        Update[(String, Instant, Json, Boolean, Option[String], Option[String], Option[String], Option[String], Option[String], Option[String], Option[String], Option[String])](sql).updateMany(eventData)
       }
 
       val insertColumnsProgram = if (allColumns.nonEmpty) {
@@ -251,7 +252,7 @@ private[micro] object PostgresqlStorage {
   implicit val logger: Logger[IO] = Slf4jLogger.getLogger[IO]
 
   // Columns that have dedicated table columns (rather than JSON extraction)
-  private val INDEXED_COLUMNS = Set("event_id", "app_id", "event_name", "platform", "name_tracker", "domain_userid", "v_tracker", "user_id")
+  private val INDEXED_COLUMNS = Set("event_id", "app_id", "event_name", "platform", "name_tracker", "domain_userid", "v_tracker", "user_id", "network_userid")
 
   // Limit scan depth for columnStats queries to improve performance
   // Only scan most recent N events instead of entire table
@@ -307,7 +308,8 @@ private[micro] object PostgresqlStorage {
         name_tracker TEXT,
         domain_userid TEXT,
         v_tracker TEXT,
-        user_id TEXT
+        user_id TEXT,
+        network_userid TEXT
       )
     """.update.run.void *>
       // Timestamp-only index for queries without column filters
@@ -323,7 +325,10 @@ private[micro] object PostgresqlStorage {
       sql"CREATE INDEX IF NOT EXISTS idx_events_v_tracker_timestamp ON events(v_tracker, timestamp)".update.run.void *>
       // Migration: add user_id column if table already exists without it
       sql"ALTER TABLE events ADD COLUMN IF NOT EXISTS user_id TEXT".update.run.void *>
-      sql"CREATE INDEX IF NOT EXISTS idx_events_user_id_timestamp ON events(user_id, timestamp)".update.run.void
+      sql"CREATE INDEX IF NOT EXISTS idx_events_user_id_timestamp ON events(user_id, timestamp)".update.run.void *>
+      // Migration: add network_userid column if table already exists without it
+      sql"ALTER TABLE events ADD COLUMN IF NOT EXISTS network_userid TEXT".update.run.void *>
+      sql"CREATE INDEX IF NOT EXISTS idx_events_network_userid_timestamp ON events(network_userid, timestamp)".update.run.void
   }
 
   private def createColumnsTable: ConnectionIO[Unit] = {
