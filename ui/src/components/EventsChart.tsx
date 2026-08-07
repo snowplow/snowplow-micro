@@ -6,13 +6,19 @@ import {
   ChartTooltip,
 } from '@/components/ui/chart'
 import { type TimelineData } from '@/services/api'
+import { overlapsRange, resolveTimeFilter, type TimeFilter } from '@/utils/time-filter'
 
 interface EventsChartProps {
   timelineData: TimelineData
-  selectedBucket: string | null
-  onBucketClick: (bucketKey: string | null) => void
+  timeFilter: TimeFilter | null
+  onTimeFilterChange: (value: TimeFilter | null) => void
+  timeFilterAnchor: Date
   timeFormat: (date: Date) => string
 }
+
+// ISO strings can differ in formatting (e.g. with/without milliseconds), so compare as instants
+const sameInstant = (a?: string, b?: string): boolean =>
+  a && b ? new Date(a).getTime() === new Date(b).getTime() : !a && !b
 
 const chartConfig = {
   validEvents: {
@@ -27,8 +33,9 @@ const chartConfig = {
 
 export function EventsChart({
   timelineData,
-  selectedBucket,
-  onBucketClick,
+  timeFilter,
+  onTimeFilterChange,
+  timeFilterAnchor,
   timeFormat,
 }: EventsChartProps) {
   const [barHovered, setBarHovered] = useState(false)
@@ -50,24 +57,39 @@ export function EventsChart({
       // Check if we actually have events at this time point
       if (data.validEvents > 0 || data.failedEvents > 0) {
         // Clicking on a bar with actual data - toggle selection
-        const bucketKey = `${data.bucketStart}|${data.bucketEnd}`
-        onBucketClick(selectedBucket === bucketKey ? null : bucketKey)
+        const isSelected =
+          timeFilter?.kind === 'absolute' &&
+          sameInstant(timeFilter.start, data.bucketStart) &&
+          sameInstant(timeFilter.end, data.bucketEnd)
+        onTimeFilterChange(
+          isSelected
+            ? null
+            : { kind: 'absolute', start: data.bucketStart, end: data.bucketEnd }
+        )
       } else {
         // Clicking on empty area (no events at this time) - reset selection
-        onBucketClick(null)
+        onTimeFilterChange(null)
       }
     } else {
       // Clicking on empty area - reset selection
-      onBucketClick(null)
+      onTimeFilterChange(null)
     }
   }
 
+  const selectedRange = useMemo(
+    () => (timeFilter ? resolveTimeFilter(timeFilter, timeFilterAnchor) : null),
+    [timeFilter, timeFilterAnchor]
+  )
+
   const getBarOpacity = (index: number): number => {
+    if (!selectedRange) return 0.8
     const data = chartData[index]
-    const bucketKey = `${data.bucketStart}|${data.bucketEnd}`
-    if (selectedBucket === bucketKey) return 1.0
-    if (selectedBucket && selectedBucket !== bucketKey) return 0.2
-    return 0.8
+    const overlaps = overlapsRange(
+      selectedRange,
+      new Date(data.bucketStart),
+      new Date(data.bucketEnd)
+    )
+    return overlaps ? 1.0 : 0.2
   }
 
   return (

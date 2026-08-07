@@ -1,10 +1,11 @@
 import type { Event } from '@/services/api'
+import { FAILURE_COLUMN } from './fixed-columns'
 
 /**
  * Check if an event has failure data
  */
 export function hasFailureData(event: Event): boolean {
-  const failureData = event.contexts_com_snowplowanalytics_snowplow_failure_1
+  const failureData = event[FAILURE_COLUMN]
   return (
     failureData !== undefined &&
     failureData !== null &&

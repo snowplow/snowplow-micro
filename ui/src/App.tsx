@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { useAuth } from '@/contexts/AuthContext'
 import { DataTable } from '@/components/DataTable'
 import { ColumnSelector } from '@/components/ColumnSelector'
@@ -13,6 +13,13 @@ import {
   type EventsFilter,
   EventsApiService,
 } from '@/services/api'
+import {
+  describeTimeFilter,
+  formatDayHour,
+  formatMinute,
+  resolveTimeFilter,
+  type TimeFilter,
+} from '@/utils/time-filter'
 import { useColumnManager } from '@/hooks/useColumnManager'
 import { Button } from '@/components/ui/button'
 import { Toggle } from '@/components/ui/toggle'
@@ -34,6 +41,7 @@ import {
 } from 'lucide-react'
 import { type ColumnFiltersState, type SortingState } from '@tanstack/react-table'
 import { parseViewUrl, serializeViewUrl } from '@/utils/view-url'
+import { TIMESTAMP_COLUMN } from '@/utils/fixed-columns'
 
 function App() {
   const { isAuthenticated, isLoading: authIsLoading, error } = useAuth()
@@ -102,15 +110,19 @@ function Dashboard() {
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>(
     urlState?.filters ?? []
   )
-  const [selectedTimeBucket, setSelectedTimeBucket] = useState<string | null>(
-    urlState?.timeBucket ?? null
+  const [timeFilter, setTimeFilter] = useState<TimeFilter | null>(
+    urlState?.timeFilter ?? null
   )
   const [lastRefreshTime, setLastRefreshTime] = useState<Date | null>(null)
+  // Relative filters need an instant to resolve against before the first refresh lands
+  const timeFilterAnchor = useMemo(() => lastRefreshTime ?? new Date(), [lastRefreshTime])
   const [showActionsMenu, setShowActionsMenu] = useState(false)
   const [columnStats, setColumnStats] = useState<Record<string, ColumnStats>>(
     {}
   )
-  const [sorting, setSorting] = useState<SortingState>([])
+  const [sorting, setSorting] = useState<SortingState>([
+    { id: TIMESTAMP_COLUMN, desc: true },
+  ])
   const [autoRefresh, setAutoRefresh] = useState(false)
   const autoRefreshIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const refreshAllDataRef = useRef<() => void>(() => {})
@@ -157,14 +169,14 @@ function Dashboard() {
     persistToStorage: !isUrlMode,
   })
 
-  // Set initial sorting when collector_tstamp is available
   useEffect(() => {
-    if (sorting.length === 0 && selectedColumns.some(col => col.name === 'collector_tstamp')) {
-      setSorting([{ id: 'collector_tstamp', desc: true }])
+    if (sorting.length === 0) {
+      setSorting([{ id: TIMESTAMP_COLUMN, desc: true }])
     }
-  }, [selectedColumns, sorting])
+  }, [sorting])
 
-  const buildEventsRequest = (isRefresh = false): EventsRequest => {
+  // Passing a refresh time both marks this as a refresh and anchors relative filters to it
+  const buildEventsRequest = (refreshTime?: Date): EventsRequest => {
     // Separate status filter from column filters
     const statusFilter = columnFilters.find(f => f.id === 'status')
     const regularFilters = columnFilters.filter(f => f.id !== 'status')
@@ -183,28 +195,19 @@ function Dashboard() {
         : undefined
       : undefined
 
-    let timeRange
-    if (isRefresh) {
-      // only filter by selected bucket, or not at all
-      timeRange = selectedTimeBucket
-        ? {
-            start: selectedTimeBucket.split('|')[0],
-            end: selectedTimeBucket.split('|')[1],
-          }
-        : undefined
-    } else {
+    // relative filters ("last 15 min") re-anchor on every refresh, then stay put
+    // between refreshes so paging through results stays stable
+    const anchor = refreshTime ?? timeFilterAnchor
+    const range = timeFilter ? resolveTimeFilter(timeFilter, anchor) : undefined
+
+    let timeRange = range
+    if (!refreshTime && lastRefreshTime) {
       // add a (non-inclusive) upper bound to avoid getting newer events in the results
-      if (selectedTimeBucket && lastRefreshTime) {
-        const bucketStart = selectedTimeBucket.split('|')[0]
-        const bucketEnd = selectedTimeBucket.split('|')[1]
-        const bucketEndTime = new Date(bucketEnd)
-        timeRange = {
-          start: bucketStart,
-          end: bucketEndTime < lastRefreshTime ? bucketEnd : lastRefreshTime.toISOString(),
-        }
-      } else if (lastRefreshTime) {
-        timeRange = { end: lastRefreshTime.toISOString() }
-      }
+      const end =
+        range?.end && new Date(range.end) < lastRefreshTime
+          ? range.end
+          : lastRefreshTime.toISOString()
+      timeRange = { start: range?.start, end }
     }
 
     return {
@@ -221,7 +224,7 @@ function Dashboard() {
     setIsLoading(true)
     try {
       const token = await getAccessToken()
-      const request = buildEventsRequest(false)
+      const request = buildEventsRequest()
       const fetchedEventData =
         await EventsApiService.fetchFilteredEvents(request, token)
       setEventData(fetchedEventData)
@@ -244,9 +247,10 @@ function Dashboard() {
     setIsRefreshing(true)
     try {
       setCurrentPage(1)
+      const refreshTime = new Date()
       const token = await getAccessToken()
       const selectedColumnNames = selectedColumns.map((col) => col.name)
-      const request = { ...buildEventsRequest(true), page: 1 }
+      const request = { ...buildEventsRequest(refreshTime), page: 1 }
 
       const [
         fetchedEventData,
@@ -267,7 +271,7 @@ function Dashboard() {
       setDaysTimelineData(days)
       setAvailableColumnNames(fetchedColumns)
       setColumnStats(fetchedColumnStats)
-      setLastRefreshTime(new Date())
+      setLastRefreshTime(refreshTime)
     } catch (err) {
       console.error('Failed to refresh data:', err)
     } finally {
@@ -289,7 +293,7 @@ function Dashboard() {
       setMinutesTimelineData({ points: [] })
       setDaysTimelineData({ points: [] })
       setAvailableColumnNames([])
-      setSelectedTimeBucket(null)
+      setTimeFilter(null)
       setCurrentPage(1)
       setLastRefreshTime(null)
     } catch (err) {
@@ -343,11 +347,11 @@ function Dashboard() {
   }
 
   // Check if any filters are active
-  const hasActiveFilters = selectedTimeBucket !== null || columnFilters.length > 0
+  const hasActiveFilters = timeFilter !== null || columnFilters.length > 0
 
   // Reset all filters
   const resetAllFilters = () => {
-    setSelectedTimeBucket(null)
+    setTimeFilter(null)
     setColumnFilters([])
   }
 
@@ -355,12 +359,8 @@ function Dashboard() {
   const getActiveFilters = () => {
     const filters: string[] = []
 
-    if (selectedTimeBucket) {
-      const bucketStart = selectedTimeBucket.split('|')[0]
-      const bucketEnd = selectedTimeBucket.split('|')[1]
-      const startDate = new Date(bucketStart)
-      const endDate = new Date(bucketEnd)
-      filters.push(`Time: ${startDate.toLocaleString()} – ${endDate.toLocaleString()}`)
+    if (timeFilter) {
+      filters.push(`Time: ${describeTimeFilter(timeFilter)}`)
     }
 
     if (columnFilters.length > 0) {
@@ -385,7 +385,7 @@ function Dashboard() {
     }, 400)
 
     return () => clearTimeout(timeoutId)
-  }, [columnFilters, selectedTimeBucket, currentPage, sorting])
+  }, [columnFilters, timeFilter, currentPage, sorting])
 
   // Keep refreshAllDataRef up to date so the interval always calls the latest version
   useEffect(() => {
@@ -415,10 +415,10 @@ function Dashboard() {
   const selectedColumnNames = selectedColumns.map((col) => col.name)
   useEffect(() => {
     if (!isUrlMode) return
-    const url = serializeViewUrl(selectedColumns, columnFilters, selectedTimeBucket)
+    const url = serializeViewUrl(selectedColumns, columnFilters, timeFilter)
     const { pathname, search } = new URL(url)
     window.history.replaceState({}, '', pathname + search)
-  }, [isUrlMode, selectedColumnNames.join(','), columnFilters, selectedTimeBucket])
+  }, [isUrlMode, selectedColumnNames.join(','), columnFilters, timeFilter])
 
   // Re-fetch column stats whenever selected columns change (after initial load)
   useEffect(() => {
@@ -429,7 +429,7 @@ function Dashboard() {
   // "Copied!" feedback state
   const [copied, setCopied] = useState(false)
   const copyViewUrl = () => {
-    const url = serializeViewUrl(selectedColumns, columnFilters, selectedTimeBucket)
+    const url = serializeViewUrl(selectedColumns, columnFilters, timeFilter)
     navigator.clipboard.writeText(url)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
@@ -581,25 +581,19 @@ function Dashboard() {
             <div className="flex-1">
               <EventsChart
                 timelineData={daysTimelineData}
-                selectedBucket={selectedTimeBucket}
-                onBucketClick={setSelectedTimeBucket}
-                timeFormat={(date) => date.toLocaleDateString('en-US', {
-                  month: 'short',
-                  day: 'numeric',
-                  hour: '2-digit'
-                })}
+                timeFilter={timeFilter}
+                onTimeFilterChange={setTimeFilter}
+                timeFilterAnchor={timeFilterAnchor}
+                timeFormat={formatDayHour}
               />
             </div>
             <div className="flex-1">
               <EventsChart
                 timelineData={minutesTimelineData}
-                selectedBucket={selectedTimeBucket}
-                onBucketClick={setSelectedTimeBucket}
-                timeFormat={(date) => date.toLocaleTimeString('en-US', {
-                  hour12: false,
-                  hour: '2-digit',
-                  minute: '2-digit',
-                })}
+                timeFilter={timeFilter}
+                onTimeFilterChange={setTimeFilter}
+                timeFilterAnchor={timeFilterAnchor}
+                timeFormat={formatMinute}
               />
             </div>
           </div>
@@ -612,7 +606,9 @@ function Dashboard() {
               selectedCellId={selectedCellId}
               columnFilters={columnFilters}
               setColumnFilters={setColumnFilters}
-              selectedTimeBucket={selectedTimeBucket}
+              timeFilter={timeFilter}
+              onTimeFilterChange={setTimeFilter}
+              timeFilterAnchor={timeFilterAnchor}
               onJsonCellToggle={toggleJsonPanel}
               onReorderColumns={reorderColumns}
               onRowClick={handleRowClick}
