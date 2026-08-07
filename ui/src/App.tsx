@@ -169,12 +169,6 @@ function Dashboard() {
     persistToStorage: !isUrlMode,
   })
 
-  useEffect(() => {
-    if (sorting.length === 0) {
-      setSorting([{ id: TIMESTAMP_COLUMN, desc: true }])
-    }
-  }, [sorting])
-
   // Passing a refresh time both marks this as a refresh and anchors relative filters to it
   const buildEventsRequest = (refreshTime?: Date): EventsRequest => {
     // Separate status filter from column filters

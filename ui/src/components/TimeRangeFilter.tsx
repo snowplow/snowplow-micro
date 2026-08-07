@@ -4,15 +4,21 @@ import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import {
+  DAY_END,
+  DAY_START,
   LOCALE,
   STRIP_DAYS,
   TIME_PRESETS,
+  addDays,
+  combineDayAndTime,
   describeTimeFilter,
   formatDay,
   isSameDay,
   overlapsRange,
   presetLabel,
   resolveTimeFilter,
+  startOfDay,
+  toTimeInput,
   type TimeFilter,
 } from '@/utils/time-filter'
 
@@ -20,38 +26,6 @@ type TimeRangeFilterProps = {
   value: TimeFilter | null
   onChange: (value: TimeFilter | null) => void
   anchor: Date
-}
-
-const DAY_START = '00:00'
-const DAY_END = '23:59'
-
-const pad = (n: number) => String(n).padStart(2, '0')
-
-function toTimeInput(date?: Date): string {
-  return date ? `${pad(date.getHours())}:${pad(date.getMinutes())}` : ''
-}
-
-function startOfDay(date: Date): Date {
-  const day = new Date(date)
-  day.setHours(0, 0, 0, 0)
-  return day
-}
-
-function addDays(date: Date, count: number): Date {
-  const shifted = new Date(date)
-  shifted.setDate(date.getDate() + count)
-  return shifted
-}
-
-// The day strip picks the day, the time fields pick the time within it. The end
-// bound is exclusive, so as an end 23:59 has to mean the very end of the day or a
-// whole-day selection would drop its final minute.
-function combine(day: Date, time: string, isEnd: boolean): string {
-  const [hours, minutes] = time.split(':').map(Number)
-  const endOfDay = isEnd && time === DAY_END
-  const combined = new Date(day)
-  combined.setHours(hours || 0, minutes || 0, endOfDay ? 59 : 0, endOfDay ? 999 : 0)
-  return combined.toISOString()
 }
 
 function TimeField({
@@ -115,14 +89,7 @@ export function TimeRangeFilter({ value, onChange, anchor }: TimeRangeFilterProp
     resolved ? overlapsRange(resolved, day, addDays(day, 1)) : false
 
   const emit = (start?: string, end?: string) => {
-    // A start past the end matches nothing and nothing in the UI says why, so keep
-    // the pair ordered instead (both are ISO strings, which sort chronologically)
-    const ordered = start && end && start > end ? [end, start] : [start, end]
-    onChange(
-      ordered[0] || ordered[1]
-        ? { kind: 'absolute', start: ordered[0], end: ordered[1] }
-        : null
-    )
+    onChange(start || end ? { kind: 'absolute', start, end } : null)
   }
 
   const selectDay = (day: Date) => {
@@ -136,7 +103,10 @@ export function TimeRangeFilter({ value, onChange, anchor }: TimeRangeFilterProp
     const extending = absolute && from && to && isSameDay(from, to) && !isSameDay(from, day)
     if (extending) {
       const [first, last] = day < from ? [day, from] : [from, day]
-      emit(combine(first, startTime, false), combine(last, endTime, true))
+      emit(
+        combineDayAndTime(first, startTime, false),
+        combineDayAndTime(last, endTime, true)
+      )
       return
     }
     // Re-picking the day the selection sits on widens it to the whole day, then
@@ -150,7 +120,10 @@ export function TimeRangeFilter({ value, onChange, anchor }: TimeRangeFilterProp
       startTime = DAY_START
       endTime = DAY_END
     }
-    emit(combine(day, startTime, false), combine(day, endTime, true))
+    emit(
+      combineDayAndTime(day, startTime, false),
+      combineDayAndTime(day, endTime, true)
+    )
   }
 
   const handleTimeChange = (part: 'start' | 'end', time: string) => {
@@ -159,7 +132,7 @@ export function TimeRangeFilter({ value, onChange, anchor }: TimeRangeFilterProp
     if (!time) return
     const isEnd = part === 'end'
     const day = (isEnd ? to : from) ?? from ?? to ?? anchor
-    const bound = combine(day, time, isEnd)
+    const bound = combineDayAndTime(day, time, isEnd)
     emit(isEnd ? resolved?.start : bound, isEnd ? bound : resolved?.end)
   }
 

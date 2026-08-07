@@ -30,11 +30,48 @@ export function resolveTimeFilter(filter: TimeFilter, anchor: Date): TimeRange {
 export function overlapsRange(range: TimeRange, spanStart: Date, spanEnd: Date): boolean {
   const start = range.start ? new Date(range.start).getTime() : -Infinity
   const end = range.end ? new Date(range.end).getTime() : Infinity
+  // The time fields allow an inverted range. It holds no instant at all, so nothing
+  // overlaps it — without this the day strip would light up for a filter matching nothing
+  if (start >= end) return false
   return spanEnd.getTime() > start && spanStart.getTime() < end
 }
 
 export function presetLabel(minutes: number): string {
   return `Last ${minutes} min`
+}
+
+// The time fields are `<input type="time">`, so bounds are picked as local wall clock
+export const DAY_START = '00:00'
+export const DAY_END = '23:59'
+
+const pad = (n: number) => String(n).padStart(2, '0')
+
+export function toTimeInput(date?: Date): string {
+  return date ? `${pad(date.getHours())}:${pad(date.getMinutes())}` : ''
+}
+
+export function startOfDay(date: Date): Date {
+  const day = new Date(date)
+  day.setHours(0, 0, 0, 0)
+  return day
+}
+
+export function addDays(date: Date, count: number): Date {
+  const shifted = new Date(date)
+  shifted.setDate(date.getDate() + count)
+  return shifted
+}
+
+// The day strip picks the day, the time fields pick the time within it. The end bound is
+// exclusive, so as an end 23:59 has to stretch to the end of that minute or a whole-day
+// selection would drop its final minute. It stops a millisecond short of the next day so
+// that reading the bound back still lands on the day the user picked.
+export function combineDayAndTime(day: Date, time: string, isEnd: boolean): string {
+  const [hours, minutes] = time.split(':').map(Number)
+  const endOfDay = isEnd && time === DAY_END
+  const combined = new Date(day)
+  combined.setHours(hours || 0, minutes || 0, endOfDay ? 59 : 0, endOfDay ? 999 : 0)
+  return combined.toISOString()
 }
 
 // Every time label in the UI reads the same way, charts included
