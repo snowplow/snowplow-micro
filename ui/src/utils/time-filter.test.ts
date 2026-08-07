@@ -6,6 +6,7 @@ import {
   addDays,
   combineDayAndTime,
   describeTimeFilter,
+  formatMinute,
   isSameDay,
   overlapsRange,
   resolveTimeFilter,
@@ -216,6 +217,23 @@ describe('overlapsRange', () => {
         ...day
       )
     ).toBe(false)
+  })
+})
+
+describe('formatMinute', () => {
+  it('uses a 24-hour clock', () => {
+    expect(formatMinute(local(2026, 3, 14, 13, 5))).toBe('13:05')
+  })
+
+  // `hour12: false` resolves to h24 on some ICU builds, which writes midnight as 24:00
+  // without rolling the date back, so the same label means two different days
+  it('writes midnight as 00:00, not 24:00', () => {
+    expect(formatMinute(local(2026, 3, 14, 0, 0))).toBe('00:00')
+    expect(formatMinute(local(2026, 3, 14, 0, 30))).toBe('00:30')
+  })
+
+  it('writes the last minute of the day as 23:59', () => {
+    expect(formatMinute(local(2026, 3, 14, 23, 59))).toBe('23:59')
   })
 })
 

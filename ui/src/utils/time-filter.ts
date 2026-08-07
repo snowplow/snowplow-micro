@@ -80,7 +80,10 @@ const DATE_OPTS: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric' }
 const TIME_OPTS: Intl.DateTimeFormatOptions = {
   hour: '2-digit',
   minute: '2-digit',
-  hour12: false,
+  // Not `hour12: false`: that resolves to h24 on some ICU builds, which renders
+  // midnight as 24:00. Asking for h23 pins it to 00:00 everywhere. The two cannot be
+  // combined — `hour12` takes precedence over `hourCycle` when both are given.
+  hourCycle: 'h23',
 }
 
 export function formatDay(date: Date): string {
