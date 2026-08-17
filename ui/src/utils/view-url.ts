@@ -1,18 +1,25 @@
 import type { ColumnFiltersState } from '@tanstack/react-table'
 import type { ColumnMetadata } from '@/utils/column-metadata'
+import { isFixedColumn } from '@/utils/fixed-columns'
+import { MAX_RELATIVE_MINUTES, type TimeFilter } from '@/utils/time-filter'
 
 export type UrlViewState = {
   columns: string[]
   filters: ColumnFiltersState
-  timeBucket: string | null
+  timeFilter: TimeFilter | null
 }
+
+const RELATIVE_TIME = /^last(\d+)m$/
+
+const timestamp = (value: string): string | undefined =>
+  value && !Number.isNaN(new Date(value).getTime()) ? value : undefined
 
 export function parseViewUrl(): UrlViewState | null {
   const params = new URLSearchParams(window.location.search)
 
   const columns: string[] = []
   const filters: ColumnFiltersState = []
-  let timeBucket: string | null = null
+  let timeFilter: TimeFilter | null = null
 
   for (const [key, value] of params) {
     if (key === 'status') {
@@ -20,11 +27,21 @@ export function parseViewUrl(): UrlViewState | null {
         filters.push({ id: 'status', value })
       }
     } else if (key === 'time') {
-      const parts = value.split('~')
-      if (parts.length === 2) {
-        timeBucket = `${parts[0]}|${parts[1]}`
+      const relative = RELATIVE_TIME.exec(value)
+      if (relative) {
+        const minutes = Number(relative[1])
+        if (minutes > 0 && minutes <= MAX_RELATIVE_MINUTES) {
+          timeFilter = { kind: 'relative', minutes }
+        }
+      } else {
+        const parts = value.split('~')
+        const start = timestamp(parts[0] ?? '')
+        const end = timestamp(parts[1] ?? '')
+        if (start || end) {
+          timeFilter = { kind: 'absolute', start, end }
+        }
       }
-    } else {
+    } else if (!isFixedColumn(key)) {
       columns.push(key)
       if (value) {
         filters.push({ id: key, value: value.split('~') })
@@ -32,14 +49,14 @@ export function parseViewUrl(): UrlViewState | null {
     }
   }
 
-  if (columns.length === 0) return null
-  return { columns, filters, timeBucket }
+  if (columns.length === 0 && filters.length === 0 && !timeFilter) return null
+  return { columns, filters, timeFilter }
 }
 
 export function serializeViewUrl(
   selectedColumns: ColumnMetadata[],
   columnFilters: ColumnFiltersState,
-  selectedTimeBucket: string | null,
+  timeFilter: TimeFilter | null,
 ): string {
   const parts: string[] = []
 
@@ -65,9 +82,12 @@ export function serializeViewUrl(
     parts.push(`status=${encodeURIComponent(String(statusFilter.value))}`)
   }
 
-  if (selectedTimeBucket) {
-    const [start, end] = selectedTimeBucket.split('|')
-    parts.push(`time=${encodeURIComponent(start)}~${encodeURIComponent(end)}`)
+  if (timeFilter?.kind === 'relative') {
+    parts.push(`time=last${timeFilter.minutes}m`)
+  } else if (timeFilter) {
+    parts.push(
+      `time=${encodeURIComponent(timeFilter.start ?? '')}~${encodeURIComponent(timeFilter.end ?? '')}`
+    )
   }
 
   return `${window.location.origin}${window.location.pathname}?${parts.join('&')}`

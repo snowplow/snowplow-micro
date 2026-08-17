@@ -30,9 +30,11 @@ import {
   type EventColumnMeta,
 } from '@/utils/column-generation'
 import type { Event, ColumnStats } from '@/services/api'
+import type { TimeFilter } from '@/utils/time-filter'
 import { type ColumnMetadata } from '@/utils/column-metadata'
 import { MultiSelectFilter } from '@/components/MultiSelectFilter'
 import { StatusDropdown } from '@/components/StatusDropdown'
+import { TimeRangeFilter } from '@/components/TimeRangeFilter'
 
 type DataTableProps = {
   events: Event[]
@@ -41,7 +43,9 @@ type DataTableProps = {
   selectedCellId: string | null
   columnFilters: ColumnFiltersState
   setColumnFilters: OnChangeFn<ColumnFiltersState>
-  selectedTimeBucket: string | null
+  timeFilter: TimeFilter | null
+  onTimeFilterChange: (value: TimeFilter | null) => void
+  timeFilterAnchor: Date
   onJsonCellToggle: (cellId: string, value: any, title: string) => void
   onReorderColumns: (fromIndex: number, toIndex: number) => void
   onRowClick: (rowId: string, event: Event) => void
@@ -62,7 +66,9 @@ export function DataTable({
   selectedCellId,
   columnFilters,
   setColumnFilters,
-  selectedTimeBucket,
+  timeFilter,
+  onTimeFilterChange,
+  timeFilterAnchor,
   onJsonCellToggle,
   onReorderColumns,
   onRowClick,
@@ -156,6 +162,13 @@ export function DataTable({
                                 )
                               }}
                             />
+                          ) : (header.column.columnDef.meta as EventColumnMeta)
+                              ?.eventTimeFilter ? (
+                            <TimeRangeFilter
+                              value={timeFilter}
+                              onChange={onTimeFilterChange}
+                              anchor={timeFilterAnchor}
+                            />
                           ) : header.column.getCanFilter() ? (
                             <MultiSelectFilter
                               options={
@@ -218,12 +231,14 @@ export function DataTable({
                     >
                       {(() => {
                         const hasColumnFilters = columnFilters.length > 0
-                        const hasSelectedTimeBucket = selectedTimeBucket !== null
+                        const hasTimeFilter = timeFilter !== null
 
-                        if (hasColumnFilters && hasSelectedTimeBucket) {
-                          return 'No events matching filters and selected time'
+                        if (hasColumnFilters && hasTimeFilter) {
+                          return 'No events matching filters in the selected time range'
                         } else if (hasColumnFilters) {
                           return 'No events matching filters'
+                        } else if (hasTimeFilter) {
+                          return 'No events in the selected time range'
                         } else {
                           return 'No events'
                         }

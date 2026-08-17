@@ -1,4 +1,4 @@
-import type { ColumnDef } from '@tanstack/react-table'
+import type { Column, ColumnDef } from '@tanstack/react-table'
 import { Button } from '@/components/ui/button'
 import { ArrowUp, ArrowDown, Eye, Check, X } from 'lucide-react'
 import type { Event, ColumnStats } from '@/services/api'
@@ -7,11 +7,41 @@ import { TruncatedCell } from '@/components/TruncatedCell'
 import { TruncatedColumnName } from '@/components/TruncatedColumnName'
 import { truncateJsonForDisplay } from './json-fields'
 import { type ColumnMetadata } from './column-metadata'
+import { FAILURE_COLUMN, TIMESTAMP_COLUMN } from './fixed-columns'
 import { hasFailureData } from './event-utils'
 
 export type EventColumnMeta = {
   eventStatusFilter?: boolean
+  eventTimeFilter?: boolean
   distinctValues?: string[]
+}
+
+function SortableHeader({
+  column,
+  children,
+}: {
+  column: Column<Event>
+  children: React.ReactNode
+}) {
+  return (
+    <Button
+      variant="ghost"
+      onClick={() => column.toggleSorting(column.getIsSorted() !== 'desc')}
+      className="h-8 px-2 flex items-center group"
+      title="Sort column"
+    >
+      {children}
+      <div className="ml-2">
+        {column.getIsSorted() === 'asc' ? (
+          <ArrowUp className="h-4 w-4" />
+        ) : column.getIsSorted() === 'desc' ? (
+          <ArrowDown className="h-4 w-4" />
+        ) : (
+          <ArrowDown className="h-4 w-4 opacity-0 group-hover:opacity-100 transition-opacity" />
+        )}
+      </div>
+    </Button>
+  )
 }
 
 export type EventColumnDef = ColumnDef<Event> & {
@@ -30,7 +60,7 @@ export function generateColumns(
 ): EventColumnDef[] {
   const columns: EventColumnDef[] = []
 
-  // Pinned status column
+  // Fixed status column
   columns.push({
     id: 'status',
     accessorFn: (row) => (hasFailureData(row) ? 'failed' : 'valid'),
@@ -54,8 +84,7 @@ export function generateColumns(
         )
       }
 
-      const failureData =
-        row.original.contexts_com_snowplowanalytics_snowplow_failure_1
+      const failureData = row.original[FAILURE_COLUMN]
       if (Array.isArray(failureData) && onJsonCellToggle) {
         const failureCount = failureData.length
         return (
@@ -94,6 +123,28 @@ export function generateColumns(
     enableColumnFilter: true,
   })
 
+  // Fixed timestamp column, carrying the time filter
+  columns.push({
+    id: TIMESTAMP_COLUMN,
+    accessorFn: (row) => row[TIMESTAMP_COLUMN],
+    meta: {
+      eventTimeFilter: true,
+    },
+    header: ({ column }) => (
+      <SortableHeader column={column}>{TIMESTAMP_COLUMN}</SortableHeader>
+    ),
+    cell: ({ getValue }) => {
+      const value = getValue()
+      return (
+        <div className="px-2 py-1">
+          {value === undefined ? '' : new Date(value as string).toLocaleString()}
+        </div>
+      )
+    },
+    enableSorting: true,
+    enableColumnFilter: false,
+  })
+
   // Add selected columns
   selectedColumns.forEach((columnMetadata, index) => {
     const { name: fieldName } = columnMetadata
@@ -119,25 +170,9 @@ export function generateColumns(
                 columnMetadata={columnMetadata}
               />
             ) : (
-              <Button
-                variant="ghost"
-                onClick={() =>
-                  column.toggleSorting(column.getIsSorted() !== 'desc')
-                }
-                className="h-8 px-2 flex items-center group"
-                title="Sort column"
-              >
+              <SortableHeader column={column}>
                 <TruncatedColumnName columnMetadata={columnMetadata} />
-                <div className="ml-2">
-                  {column.getIsSorted() === 'asc' ? (
-                    <ArrowUp className="h-4 w-4" />
-                  ) : column.getIsSorted() === 'desc' ? (
-                    <ArrowDown className="h-4 w-4" />
-                  ) : (
-                    <ArrowDown className="h-4 w-4 opacity-0 group-hover:opacity-100 transition-opacity" />
-                  )}
-                </div>
-              </Button>
+              </SortableHeader>
             )}
           </DraggableColumn>
         )

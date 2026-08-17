@@ -6,13 +6,22 @@ import {
   ChartTooltip,
 } from '@/components/ui/chart'
 import { type TimelineData } from '@/services/api'
+import { overlapsRange, resolveTimeFilter, type TimeFilter } from '@/utils/time-filter'
 
 interface EventsChartProps {
   timelineData: TimelineData
-  selectedBucket: string | null
-  onBucketClick: (bucketKey: string | null) => void
+  timeFilter: TimeFilter | null
+  onTimeFilterChange: (value: TimeFilter | null) => void
+  timeFilterAnchor: Date
   timeFormat: (date: Date) => string
 }
+
+const sameInstant = (a: string, b: string): boolean =>
+  new Date(a).getTime() === new Date(b).getTime()
+
+const BAR_OPACITY = 0.8
+const BAR_OPACITY_IN_RANGE = 1
+const BAR_OPACITY_OUT_OF_RANGE = 0.2
 
 const chartConfig = {
   validEvents: {
@@ -27,8 +36,9 @@ const chartConfig = {
 
 export function EventsChart({
   timelineData,
-  selectedBucket,
-  onBucketClick,
+  timeFilter,
+  onTimeFilterChange,
+  timeFilterAnchor,
   timeFormat,
 }: EventsChartProps) {
   const [barHovered, setBarHovered] = useState(false)
@@ -44,30 +54,37 @@ export function EventsChart({
   }, [timelineData, timeFormat])
 
   const handleChartClick = (event: any) => {
-    if (event && event.activePayload && event.activePayload.length > 0) {
-      const data = event.activePayload[0].payload
-
-      // Check if we actually have events at this time point
-      if (data.validEvents > 0 || data.failedEvents > 0) {
-        // Clicking on a bar with actual data - toggle selection
-        const bucketKey = `${data.bucketStart}|${data.bucketEnd}`
-        onBucketClick(selectedBucket === bucketKey ? null : bucketKey)
-      } else {
-        // Clicking on empty area (no events at this time) - reset selection
-        onBucketClick(null)
-      }
-    } else {
-      // Clicking on empty area - reset selection
-      onBucketClick(null)
+    const data = event?.activePayload?.[0]?.payload
+    // Clicking a bar toggles its bucket; clicking where there are no events clears the filter
+    if (!data || !(data.validEvents > 0 || data.failedEvents > 0)) {
+      onTimeFilterChange(null)
+      return
     }
+    // A bucket selection always carries both bounds, so a one-sided filter isn't one
+    const isSelected =
+      timeFilter?.kind === 'absolute' &&
+      timeFilter.start !== undefined &&
+      timeFilter.end !== undefined &&
+      sameInstant(timeFilter.start, data.bucketStart) &&
+      sameInstant(timeFilter.end, data.bucketEnd)
+    onTimeFilterChange(
+      isSelected
+        ? null
+        : { kind: 'absolute', start: data.bucketStart, end: data.bucketEnd }
+    )
   }
 
+  const selectedRange = timeFilter ? resolveTimeFilter(timeFilter, timeFilterAnchor) : null
+
   const getBarOpacity = (index: number): number => {
+    if (!selectedRange) return BAR_OPACITY
     const data = chartData[index]
-    const bucketKey = `${data.bucketStart}|${data.bucketEnd}`
-    if (selectedBucket === bucketKey) return 1.0
-    if (selectedBucket && selectedBucket !== bucketKey) return 0.2
-    return 0.8
+    const overlaps = overlapsRange(
+      selectedRange,
+      new Date(data.bucketStart),
+      new Date(data.bucketEnd)
+    )
+    return overlaps ? BAR_OPACITY_IN_RANGE : BAR_OPACITY_OUT_OF_RANGE
   }
 
   return (

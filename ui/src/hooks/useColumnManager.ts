@@ -2,11 +2,14 @@ import { useState, useMemo } from 'react'
 
 import type { ColumnFiltersState, OnChangeFn } from '@tanstack/react-table'
 import { type ColumnMetadata, createColumnMetadata } from '@/utils/column-metadata'
+import { isFixedColumn } from '@/utils/fixed-columns'
 
 const STORAGE_KEY = 'snowplow-micro-selected-columns'
 
 // Default column configuration
-const DEFAULT_COLUMNS = ['collector_tstamp', 'app_id', 'event_name']
+const DEFAULT_COLUMNS = ['app_id', 'event_name']
+
+const selectable = (columns: string[]) => columns.filter((c) => !isFixedColumn(c))
 
 /**
  * Save selected columns to localStorage
@@ -64,8 +67,8 @@ export function useColumnManager({
   initialColumns,
   persistToStorage = true,
 }: UseColumnManagerProps): UseColumnManagerReturn {
-  const [selectedColumnNames, setSelectedColumnNames] = useState<string[]>(
-    initialColumns ?? loadSelectedColumns()
+  const [selectedColumnNames, setSelectedColumnNames] = useState<string[]>(() =>
+    selectable(initialColumns ?? loadSelectedColumns())
   )
 
   const selectedColumns = useMemo(() => {
@@ -83,12 +86,9 @@ export function useColumnManager({
       ...availableColumnNames,
     ])
 
-    // Remove failure entity, br_ fields, and all their nested fields
-    const filteredColumnNames = Array.from(set).filter(
-      (columnName) =>
-        !columnName.startsWith(
-          'contexts_com_snowplowanalytics_snowplow_failure_1'
-        ) && !columnName.startsWith('br_')
+    // Remove the fixed columns, br_ fields, and all their nested fields
+    const filteredColumnNames = selectable(Array.from(set)).filter(
+      (columnName) => !columnName.startsWith('br_')
     )
 
     return filteredColumnNames.map(createColumnMetadata)
