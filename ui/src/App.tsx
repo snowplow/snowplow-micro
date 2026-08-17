@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useAuth } from '@/contexts/AuthContext'
 import { DataTable } from '@/components/DataTable'
 import { ColumnSelector } from '@/components/ColumnSelector'
@@ -114,8 +114,8 @@ function Dashboard() {
     urlState?.timeFilter ?? null
   )
   const [lastRefreshTime, setLastRefreshTime] = useState<Date | null>(null)
-  // Relative filters need an instant to resolve against before the first refresh lands
-  const timeFilterAnchor = useMemo(() => lastRefreshTime ?? new Date(), [lastRefreshTime])
+  const [mountTime] = useState(() => new Date())
+  const timeFilterAnchor = lastRefreshTime ?? mountTime
   const [showActionsMenu, setShowActionsMenu] = useState(false)
   const [columnStats, setColumnStats] = useState<Record<string, ColumnStats>>(
     {}
@@ -169,9 +169,7 @@ function Dashboard() {
     persistToStorage: !isUrlMode,
   })
 
-  // Passing a refresh time both marks this as a refresh and anchors relative filters to it
   const buildEventsRequest = (refreshTime?: Date): EventsRequest => {
-    // Separate status filter from column filters
     const statusFilter = columnFilters.find(f => f.id === 'status')
     const regularFilters = columnFilters.filter(f => f.id !== 'status')
 
@@ -180,7 +178,6 @@ function Dashboard() {
       values: Array.isArray(filter.value) ? filter.value as string[] : [String(filter.value)],
     }))
 
-    // Map status filter to validEvents field
     const validEvents = statusFilter
       ? statusFilter.value === 'valid'
         ? true
@@ -194,15 +191,15 @@ function Dashboard() {
     const anchor = refreshTime ?? timeFilterAnchor
     const range = timeFilter ? resolveTimeFilter(timeFilter, anchor) : undefined
 
-    let timeRange = range
-    if (!refreshTime && lastRefreshTime) {
-      // add a (non-inclusive) upper bound to avoid getting newer events in the results
-      const end =
-        range?.end && new Date(range.end) < lastRefreshTime
-          ? range.end
-          : lastRefreshTime.toISOString()
-      timeRange = { start: range?.start, end }
-    }
+    // Between refreshes, cap the range at the last refresh (exclusively) so that paging
+    // through the results doesn't pick up events that have arrived since
+    const cap = refreshTime ? null : lastRefreshTime
+    const timeRange = cap
+      ? {
+          start: range?.start,
+          end: range?.end && new Date(range.end) < cap ? range.end : cap.toISOString(),
+        }
+      : range
 
     return {
       filters,

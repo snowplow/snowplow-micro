@@ -12,8 +12,6 @@ import { hasFailureData } from './event-utils'
 
 export type EventColumnMeta = {
   eventStatusFilter?: boolean
-  // Marks a filter cell driven by props rather than by the table's own filter
-  // state, because the time filter is shared with the charts
   eventTimeFilter?: boolean
   distinctValues?: string[]
 }

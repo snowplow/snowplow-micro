@@ -9,10 +9,8 @@ export type UrlViewState = {
   timeFilter: TimeFilter | null
 }
 
-// Relative filters serialize as `last<minutes>m` so a shared URL keeps sliding with time
 const RELATIVE_TIME = /^last(\d+)m$/
 
-// A hand-edited bound that is not a date would otherwise reach Date arithmetic and throw
 const timestamp = (value: string): string | undefined =>
   value && !Number.isNaN(new Date(value).getTime()) ? value : undefined
 
@@ -31,7 +29,6 @@ export function parseViewUrl(): UrlViewState | null {
     } else if (key === 'time') {
       const relative = RELATIVE_TIME.exec(value)
       if (relative) {
-        // Bounded by what the charts and the day strip can show
         const minutes = Number(relative[1])
         if (minutes > 0 && minutes <= MAX_RELATIVE_MINUTES) {
           timeFilter = { kind: 'relative', minutes }
@@ -45,7 +42,6 @@ export function parseViewUrl(): UrlViewState | null {
         }
       }
     } else if (!isFixedColumn(key)) {
-      // URLs shared before these columns became fixed may still list them
       columns.push(key)
       if (value) {
         filters.push({ id: key, value: value.split('~') })
@@ -53,7 +49,6 @@ export function parseViewUrl(): UrlViewState | null {
     }
   }
 
-  // Columns can all be deselected, so a URL may legitimately carry only filters
   if (columns.length === 0 && filters.length === 0 && !timeFilter) return null
   return { columns, filters, timeFilter }
 }

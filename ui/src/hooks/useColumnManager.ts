@@ -9,7 +9,6 @@ const STORAGE_KEY = 'snowplow-micro-selected-columns'
 // Default column configuration
 const DEFAULT_COLUMNS = ['app_id', 'event_name']
 
-// Columns backing the fixed ones are never part of the user's selection
 const selectable = (columns: string[]) => columns.filter((c) => !isFixedColumn(c))
 
 /**

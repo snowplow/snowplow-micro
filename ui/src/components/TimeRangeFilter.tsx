@@ -42,8 +42,9 @@ function TimeField({
       {label}
       <Input
         type="time"
-        // Chrome lays the value box out as a flex child filling the input, so
-        // centring what it shows takes more than text-align
+        // The value lives in a shadow tree (::-webkit-datetime-edit, holding the HH and MM
+        // segments) that Chrome lays out as a flex child of the input, so `text-align` on
+        // the input never reaches it. Centring means making that element the flex container.
         className="h-7 w-auto px-3 text-center [&::-webkit-calendar-picker-indicator]:hidden [&::-webkit-datetime-edit]:flex [&::-webkit-datetime-edit]:w-full [&::-webkit-datetime-edit]:justify-center"
         value={value}
         onChange={(e) => onChange(e.target.value)}
@@ -74,8 +75,6 @@ export function TimeRangeFilter({ value, onChange, anchor }: TimeRangeFilterProp
     }
   }, [open])
 
-  // Show a relative filter as the range it currently resolves to; editing the
-  // days or the time fields freezes it into that absolute range.
   const resolved = value ? resolveTimeFilter(value, anchor) : null
   const from = resolved?.start ? new Date(resolved.start) : undefined
   const to = resolved?.end ? new Date(resolved.end) : undefined
@@ -96,30 +95,30 @@ export function TimeRangeFilter({ value, onChange, anchor }: TimeRangeFilterProp
     // Times carry over between day picks, but a relative filter resolves to an
     // arbitrary "now", which makes a poor default for a whole day
     const absolute = value?.kind === 'absolute'
-    let startTime = (absolute && toTimeInput(from)) || DAY_START
-    let endTime = (absolute && toTimeInput(to)) || DAY_END
+    const carriedStart = (absolute && toTimeInput(from)) || DAY_START
+    const carriedEnd = (absolute && toTimeInput(to)) || DAY_END
 
     // Extend when a single day is already picked, otherwise start a new selection
     const extending = absolute && from && to && isSameDay(from, to) && !isSameDay(from, day)
     if (extending) {
       const [first, last] = day < from ? [day, from] : [from, day]
       emit(
-        combineDayAndTime(first, startTime, false),
-        combineDayAndTime(last, endTime, true)
+        combineDayAndTime(first, carriedStart, false),
+        combineDayAndTime(last, carriedEnd, true)
       )
       return
     }
     // Re-picking the day the selection sits on widens it to the whole day, then
     // clears it, the way presets and chart bars toggle off
     const alreadyOnDay = from && to && isSameDay(from, day) && isSameDay(to, day)
-    if (alreadyOnDay && startTime === DAY_START && endTime === DAY_END) {
+    if (alreadyOnDay && carriedStart === DAY_START && carriedEnd === DAY_END) {
       onChange(null)
       return
     }
-    if (alreadyOnDay || startTime >= endTime) {
-      startTime = DAY_START
-      endTime = DAY_END
-    }
+    const wholeDay = alreadyOnDay || carriedStart >= carriedEnd
+    const [startTime, endTime] = wholeDay
+      ? [DAY_START, DAY_END]
+      : [carriedStart, carriedEnd]
     emit(
       combineDayAndTime(day, startTime, false),
       combineDayAndTime(day, endTime, true)
@@ -127,8 +126,6 @@ export function TimeRangeFilter({ value, onChange, anchor }: TimeRangeFilterProp
   }
 
   const handleTimeChange = (part: 'start' | 'end', time: string) => {
-    // A time input reports "" for every incomplete value, which is every keystroke
-    // until both fields are filled — dropping the bound then would clear the filter
     if (!time) return
     const isEnd = part === 'end'
     const day = (isEnd ? to : from) ?? from ?? to ?? anchor

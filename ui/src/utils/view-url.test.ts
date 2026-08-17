@@ -5,7 +5,6 @@ import { FAILURE_COLUMN, TIMESTAMP_COLUMN } from './fixed-columns'
 import { MAX_RELATIVE_MINUTES, type TimeFilter } from './time-filter'
 import { parseViewUrl, serializeViewUrl } from './view-url'
 
-// Both functions read the current location, so each case installs its own
 const at = (url: string) => {
   const { search, origin, pathname } = new URL(url)
   vi.stubGlobal('window', { location: { search, origin, pathname } })
@@ -71,13 +70,11 @@ describe('parseViewUrl', () => {
     expect(parse('?status=')).toBeNull()
   })
 
-  // Columns can all be deselected, so filters alone are a legitimate view
-  it('restores a filter-only view', () => {
+  it('restores a filter-only view with no selected columns', () => {
     expect(parse('?status=bad')).not.toBeNull()
     expect(parse('?time=last15m')).not.toBeNull()
   })
 
-  // URLs shared before these became fixed columns may still list them
   it('drops references to fixed columns and their nested fields', () => {
     expect(parse(`?${TIMESTAMP_COLUMN}=&app_id=`)?.columns).toEqual(['app_id'])
     expect(parse(`?${FAILURE_COLUMN}.errors=&app_id=`)?.columns).toEqual(['app_id'])
@@ -110,7 +107,6 @@ describe('parseViewUrl', () => {
       })
     })
 
-    // A hand-edited window outside what the charts and the day strip cover
     it('rejects a window of zero or beyond the maximum', () => {
       expect(parse('?time=last0m')).toBeNull()
       expect(parse(`?time=last${MAX_RELATIVE_MINUTES + 1}m`)).toBeNull()
@@ -146,7 +142,6 @@ describe('parseViewUrl', () => {
       })
     })
 
-    // A hand-edited bound that is not a date would otherwise reach Date arithmetic
     it('drops a bound that is not a date, keeping the one that is', () => {
       expect(parse('?time=nonsense~2026-03-15T00%3A00%3A00.000Z')?.timeFilter).toEqual({
         kind: 'absolute',

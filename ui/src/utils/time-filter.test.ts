@@ -16,7 +16,7 @@ import {
 
 // Local wall clock, which is what the day strip and the time inputs speak. Expectations
 // are built the same way rather than as ISO literals, so they hold in any zone.
-const local = (
+const localWallClock = (
   year: number,
   month: number,
   day: number,
@@ -28,15 +28,15 @@ const local = (
 
 describe('combineDayAndTime', () => {
   it('takes the day from the date and the time from the string', () => {
-    const day = local(2026, 3, 14, 17, 45, 30, 123)
+    const day = localWallClock(2026, 3, 14, 17, 45, 30, 123)
     expect(combineDayAndTime(day, '09:05', false)).toBe(
-      local(2026, 3, 14, 9, 5).toISOString()
+      localWallClock(2026, 3, 14, 9, 5).toISOString()
     )
   })
 
   it('zeroes seconds and milliseconds so a bound never lands mid-minute', () => {
     const combined = new Date(
-      combineDayAndTime(local(2026, 3, 14, 0, 0, 42, 7), '09:05', false)
+      combineDayAndTime(localWallClock(2026, 3, 14, 0, 0, 42, 7), '09:05', false)
     )
     expect(combined.getSeconds()).toBe(0)
     expect(combined.getMilliseconds()).toBe(0)
@@ -44,44 +44,44 @@ describe('combineDayAndTime', () => {
 
   // The bound is exclusive, so a plain 23:59 would cut the day's last minute
   it('stretches 23:59 as an end to the end of that minute', () => {
-    expect(combineDayAndTime(local(2026, 3, 14), DAY_END, true)).toBe(
-      local(2026, 3, 14, 23, 59, 59, 999).toISOString()
+    expect(combineDayAndTime(localWallClock(2026, 3, 14), DAY_END, true)).toBe(
+      localWallClock(2026, 3, 14, 23, 59, 59, 999).toISOString()
     )
   })
 
   it('stays within the day it was given', () => {
-    const end = new Date(combineDayAndTime(local(2026, 3, 14), DAY_END, true))
-    expect(isSameDay(end, local(2026, 3, 14))).toBe(true)
+    const end = new Date(combineDayAndTime(localWallClock(2026, 3, 14), DAY_END, true))
+    expect(isSameDay(end, localWallClock(2026, 3, 14))).toBe(true)
     expect(toTimeInput(end)).toBe(DAY_END)
   })
 
   it('does not stretch 23:59 when it is a start', () => {
-    expect(combineDayAndTime(local(2026, 3, 14), DAY_END, false)).toBe(
-      local(2026, 3, 14, 23, 59).toISOString()
+    expect(combineDayAndTime(localWallClock(2026, 3, 14), DAY_END, false)).toBe(
+      localWallClock(2026, 3, 14, 23, 59).toISOString()
     )
   })
 
   it('leaves every other end time on the minute', () => {
-    expect(combineDayAndTime(local(2026, 3, 14), '23:58', true)).toBe(
-      local(2026, 3, 14, 23, 58).toISOString()
+    expect(combineDayAndTime(localWallClock(2026, 3, 14), '23:58', true)).toBe(
+      localWallClock(2026, 3, 14, 23, 58).toISOString()
     )
-    expect(combineDayAndTime(local(2026, 3, 14), DAY_START, true)).toBe(
-      local(2026, 3, 14).toISOString()
+    expect(combineDayAndTime(localWallClock(2026, 3, 14), DAY_START, true)).toBe(
+      localWallClock(2026, 3, 14).toISOString()
     )
   })
 
   it('falls back to midnight for an unparseable time', () => {
-    expect(combineDayAndTime(local(2026, 3, 14), '', false)).toBe(
-      local(2026, 3, 14).toISOString()
+    expect(combineDayAndTime(localWallClock(2026, 3, 14), '', false)).toBe(
+      localWallClock(2026, 3, 14).toISOString()
     )
   })
 })
 
 describe('toTimeInput', () => {
   it('pads to the HH:MM an <input type="time"> expects', () => {
-    expect(toTimeInput(local(2026, 3, 14, 9, 5))).toBe('09:05')
-    expect(toTimeInput(local(2026, 3, 14, 0, 0))).toBe('00:00')
-    expect(toTimeInput(local(2026, 3, 14, 23, 59))).toBe('23:59')
+    expect(toTimeInput(localWallClock(2026, 3, 14, 9, 5))).toBe('09:05')
+    expect(toTimeInput(localWallClock(2026, 3, 14, 0, 0))).toBe('00:00')
+    expect(toTimeInput(localWallClock(2026, 3, 14, 23, 59))).toBe('23:59')
   })
 
   it('is empty without a date, which blanks the field', () => {
@@ -91,7 +91,7 @@ describe('toTimeInput', () => {
   // The popover reads its fields back off the bounds it emitted, so the pair has to
   // round-trip or picking a second day would move the times
   it('round-trips a whole-day selection', () => {
-    const day = local(2026, 3, 14)
+    const day = localWallClock(2026, 3, 14)
     const start = new Date(combineDayAndTime(day, DAY_START, false))
     const end = new Date(combineDayAndTime(day, DAY_END, true))
     expect([toTimeInput(start), toTimeInput(end)]).toEqual([DAY_START, DAY_END])
@@ -100,44 +100,44 @@ describe('toTimeInput', () => {
 
 describe('startOfDay', () => {
   it('clears the time without touching the original', () => {
-    const original = local(2026, 3, 14, 17, 45, 30, 123)
-    expect(startOfDay(original)).toEqual(local(2026, 3, 14))
-    expect(original).toEqual(local(2026, 3, 14, 17, 45, 30, 123))
+    const original = localWallClock(2026, 3, 14, 17, 45, 30, 123)
+    expect(startOfDay(original)).toEqual(localWallClock(2026, 3, 14))
+    expect(original).toEqual(localWallClock(2026, 3, 14, 17, 45, 30, 123))
   })
 })
 
 describe('addDays', () => {
   it('crosses month and year boundaries', () => {
-    expect(addDays(local(2026, 1, 31), 1)).toEqual(local(2026, 2, 1))
-    expect(addDays(local(2026, 12, 31), 1)).toEqual(local(2027, 1, 1))
-    expect(addDays(local(2026, 3, 1), -1)).toEqual(local(2026, 2, 28))
+    expect(addDays(localWallClock(2026, 1, 31), 1)).toEqual(localWallClock(2026, 2, 1))
+    expect(addDays(localWallClock(2026, 12, 31), 1)).toEqual(localWallClock(2027, 1, 1))
+    expect(addDays(localWallClock(2026, 3, 1), -1)).toEqual(localWallClock(2026, 2, 28))
   })
 
   it('lands on Feb 29 in a leap year', () => {
-    expect(addDays(local(2024, 2, 28), 1)).toEqual(local(2024, 2, 29))
+    expect(addDays(localWallClock(2024, 2, 28), 1)).toEqual(localWallClock(2024, 2, 29))
   })
 
   it('does not mutate its argument', () => {
-    const original = local(2026, 3, 14)
+    const original = localWallClock(2026, 3, 14)
     addDays(original, 5)
-    expect(original).toEqual(local(2026, 3, 14))
+    expect(original).toEqual(localWallClock(2026, 3, 14))
   })
 
   // How the day strip is built: today last, the six preceding days before it
   it('builds a contiguous strip ending today', () => {
-    const today = local(2026, 3, 1)
+    const today = localWallClock(2026, 3, 1)
     const strip = Array.from({ length: 7 }, (_, i) => addDays(today, i - 6))
-    expect(strip[0]).toEqual(local(2026, 2, 23))
+    expect(strip[0]).toEqual(localWallClock(2026, 2, 23))
     expect(strip[6]).toEqual(today)
   })
 })
 
 describe('isSameDay', () => {
   it('compares the day, not the distance', () => {
-    expect(isSameDay(local(2026, 3, 14, 0, 0), local(2026, 3, 14, 23, 59, 59, 999))).toBe(
+    expect(isSameDay(localWallClock(2026, 3, 14, 0, 0), localWallClock(2026, 3, 14, 23, 59, 59, 999))).toBe(
       true
     )
-    expect(isSameDay(local(2026, 3, 14, 23, 59), local(2026, 3, 15, 0, 0))).toBe(false)
+    expect(isSameDay(localWallClock(2026, 3, 14, 23, 59), localWallClock(2026, 3, 15, 0, 0))).toBe(false)
   })
 })
 
@@ -222,18 +222,18 @@ describe('overlapsRange', () => {
 
 describe('formatMinute', () => {
   it('uses a 24-hour clock', () => {
-    expect(formatMinute(local(2026, 3, 14, 13, 5))).toBe('13:05')
+    expect(formatMinute(localWallClock(2026, 3, 14, 13, 5))).toBe('13:05')
   })
 
   // `hour12: false` resolves to h24 on some ICU builds, which writes midnight as 24:00
   // without rolling the date back, so the same label means two different days
   it('writes midnight as 00:00, not 24:00', () => {
-    expect(formatMinute(local(2026, 3, 14, 0, 0))).toBe('00:00')
-    expect(formatMinute(local(2026, 3, 14, 0, 30))).toBe('00:30')
+    expect(formatMinute(localWallClock(2026, 3, 14, 0, 0))).toBe('00:00')
+    expect(formatMinute(localWallClock(2026, 3, 14, 0, 30))).toBe('00:30')
   })
 
   it('writes the last minute of the day as 23:59', () => {
-    expect(formatMinute(local(2026, 3, 14, 23, 59))).toBe('23:59')
+    expect(formatMinute(localWallClock(2026, 3, 14, 23, 59))).toBe('23:59')
   })
 })
 
@@ -251,8 +251,8 @@ describe('describeTimeFilter', () => {
     expect(
       describeTimeFilter({
         kind: 'absolute',
-        start: local(2026, 3, 14, 9, 0).toISOString(),
-        end: local(2026, 3, 14, 17, 30).toISOString(),
+        start: localWallClock(2026, 3, 14, 9, 0).toISOString(),
+        end: localWallClock(2026, 3, 14, 17, 30).toISOString(),
       })
     ).toBe('Mar 14, 09:00 – 17:30')
   })
@@ -261,14 +261,14 @@ describe('describeTimeFilter', () => {
     expect(
       describeTimeFilter({
         kind: 'absolute',
-        start: local(2026, 3, 14, 9, 0).toISOString(),
-        end: local(2026, 3, 15, 17, 30).toISOString(),
+        start: localWallClock(2026, 3, 14, 9, 0).toISOString(),
+        end: localWallClock(2026, 3, 15, 17, 30).toISOString(),
       })
     ).toBe('Mar 14, 09:00 – Mar 15, 17:30')
   })
 
   it('describes a whole day by its own date, not the next one', () => {
-    const day = local(2026, 3, 14)
+    const day = localWallClock(2026, 3, 14)
     expect(
       describeTimeFilter({
         kind: 'absolute',
@@ -279,7 +279,7 @@ describe('describeTimeFilter', () => {
   })
 
   it('describes a one-sided range by the bound it has', () => {
-    const bound = local(2026, 3, 14, 9, 0).toISOString()
+    const bound = localWallClock(2026, 3, 14, 9, 0).toISOString()
     expect(describeTimeFilter({ kind: 'absolute', start: bound })).toBe(
       'After Mar 14, 09:00'
     )
