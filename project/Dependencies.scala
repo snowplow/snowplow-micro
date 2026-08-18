@@ -20,7 +20,9 @@ object Dependencies {
     val snowplowCommonEnrich    = "6.13.1"
     val snowplowAnalyticsSdk    = "3.2.0"
 
-    val http4s = "0.23.33"
+    val http4s      = "0.23.33"
+    val http4sBlaze = "0.23.18" // Fix CVE for HTTP request smuggling / DoS in blaze
+    val httpClient5 = "5.6.3"   // Fix CVE-2026-64607 in the version pulled in by libthrift
     val decline     = "2.4.1"
     val catsRetry   = "3.1.3"
     val slf4j       = "2.0.17"
@@ -67,5 +69,11 @@ object Dependencies {
   val googleCloudStorage = "com.google.cloud"       % "google-cloud-storage" % V.gcpSdk
   val azureStorageBlob   = "com.azure"              % "azure-storage-blob"   % V.azureStorageBlob
   val azureIdentity      = "com.azure"              %  "azure-identity"      % V.azureIdentity
+
+  // Declared directly to evict the vulnerable blaze 0.23.15
+  val http4sBlazeServer = "org.http4s" %% "http4s-blaze-server" % V.http4sBlaze
+  val http4sBlazeClient = "org.http4s" %% "http4s-blaze-client" % V.http4sBlaze
+  // Declared directly to evict the vulnerable httpclient5 5.2.1 pulled in by libthrift
+  val httpClient5       = "org.apache.httpcomponents.client5" % "httpclient5" % V.httpClient5
 
 }
