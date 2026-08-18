@@ -36,6 +36,9 @@ lazy val buildSettings = Seq(
 lazy val dependencies = Seq(
   libraryDependencies ++= Seq(
     Dependencies.snowplowStreamCollector,
+    Dependencies.http4sBlazeServer,
+    Dependencies.http4sBlazeClient,
+    Dependencies.httpClient5,
     Dependencies.snowplowCommonEnrich,
     Dependencies.snowplowAnalyticsSdk,
     Dependencies.decline,
