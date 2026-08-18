@@ -23,6 +23,7 @@ object Dependencies {
     val http4s      = "0.23.33"
     val http4sBlaze = "0.23.18" // Fix CVE for HTTP request smuggling / DoS in blaze
     val httpClient5 = "5.6.3"   // Fix CVE-2026-64607 in the version pulled in by libthrift
+    val netty       = "4.2.17.Final" // Fix CVE-2026-59902 (SCTP OOM) & CVE-2026-59903 (CORS Vary cache poisoning) in netty 4.2.16 pulled in by snowplow-common-enrich
     val decline     = "2.4.1"
     val catsRetry   = "3.1.3"
     val slf4j       = "2.0.17"
@@ -75,5 +76,7 @@ object Dependencies {
   val http4sBlazeClient = "org.http4s" %% "http4s-blaze-client" % V.http4sBlaze
   // Declared directly to evict the vulnerable httpclient5 5.2.1 pulled in by libthrift
   val httpClient5       = "org.apache.httpcomponents.client5" % "httpclient5" % V.httpClient5
+  // Declared directly to evict the vulnerable netty 4.2.16 pulled in by snowplow-common-enrich (via netty-all)
+  val nettyAll          = "io.netty" % "netty-all" % V.netty
 
 }
