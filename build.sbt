@@ -57,7 +57,8 @@ lazy val dependencies = Seq(
     Dependencies.awsSts,
     Dependencies.googleCloudStorage,
     Dependencies.azureStorageBlob,
-    Dependencies.azureIdentity
+    Dependencies.azureIdentity,
+    Dependencies.nettyAll
   )
 )
 
