@@ -24,6 +24,7 @@ object Dependencies {
     val http4sBlaze = "0.23.18" // Fix CVE for HTTP request smuggling / DoS in blaze
     val httpClient5 = "5.6.3"   // Fix CVE-2026-64607 in the version pulled in by libthrift
     val netty       = "4.2.17.Final" // Fix CVE-2026-59902 (SCTP OOM) & CVE-2026-59903 (CORS Vary cache poisoning) in netty 4.2.16 pulled in by snowplow-common-enrich
+    val tcnative    = "2.0.81.Final"  // Align with netty 4.2.17: its OpenSSL engine calls SSL.getGroupName(long), absent in the transitively-pulled 2.0.78
     val decline     = "2.4.1"
     val catsRetry   = "3.1.3"
     val slf4j       = "2.0.17"
@@ -78,5 +79,7 @@ object Dependencies {
   val httpClient5       = "org.apache.httpcomponents.client5" % "httpclient5" % V.httpClient5
   // Declared directly to evict the vulnerable netty 4.2.16 pulled in by snowplow-common-enrich (via netty-all)
   val nettyAll          = "io.netty" % "netty-all" % V.netty
+  // Declared directly to evict tcnative 2.0.78 (aligned with netty 4.2.16) which lacks SSL.getGroupName(long) that netty 4.2.17 calls
+  val nettyTcnative     = "io.netty" % "netty-tcnative-boringssl-static" % V.tcnative
 
 }

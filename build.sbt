@@ -58,7 +58,8 @@ lazy val dependencies = Seq(
     Dependencies.googleCloudStorage,
     Dependencies.azureStorageBlob,
     Dependencies.azureIdentity,
-    Dependencies.nettyAll
+    Dependencies.nettyAll,
+    Dependencies.nettyTcnative
   )
 )
 
