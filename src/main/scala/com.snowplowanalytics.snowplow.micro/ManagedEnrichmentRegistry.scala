@@ -52,6 +52,7 @@ case class ManagedEnrichmentRegistry[F[_]: Async](
   refererParser: Option[NonEmptyHotswap[F, RefererParserEnrichment]] = None,
   uaParser: Option[NonEmptyHotswap[F, UaParserEnrichment[F]]] = None,
   eventSpec: Option[NonEmptyHotswap[F, EventSpecEnrichment[F]]] = None,
+  agentClassification: Option[NonEmptyHotswap[F, AgentClassificationEnrichment]] = None,
   // Non-asset enrichments — plain fields, never swapped.
   apiRequest: Option[ApiRequestEnrichment[F]] = None,
   piiPseudonymizer: Option[PiiPseudonymizerEnrichment] = None,
@@ -94,6 +95,7 @@ case class ManagedEnrichmentRegistry[F[_]: Async](
       refererParserSnapshot <- getHs[RefererParserEnrichment](refererParser)
       uaParserSnapshot <- getHs[UaParserEnrichment[F]](uaParser)
       eventSpecSnapshot <- getHs[EventSpecEnrichment[F]](eventSpec)
+      agentClassificationSnapshot <- getHs[AgentClassificationEnrichment](agentClassification)
     } yield EnrichmentRegistry[F](
       apiRequest = apiRequest,
       piiPseudonymizer = piiPseudonymizer,
@@ -115,7 +117,8 @@ case class ManagedEnrichmentRegistry[F[_]: Async](
       yauaa = yauaa,
       crossNavigation = crossNavigation,
       botDetection = botDetection,
-      eventSpec = eventSpecSnapshot
+      eventSpec = eventSpecSnapshot,
+      agentClassification = agentClassificationSnapshot
     )
   }
 
@@ -186,6 +189,10 @@ object ManagedEnrichmentRegistry {
                 case c: EventSpecConf =>
                   NonEmptyHotswap(Resource.eval(rethrowEither(c.enrichment[F].value)))
                     .map(hs => Right(r.copy(eventSpec = Some(hs))))
+
+                case c: AgentClassificationConf =>
+                  NonEmptyHotswap(Resource.eval(rethrowEither(c.enrichment[F].value)))
+                    .map(hs => Right(r.copy(agentClassification = Some(hs))))
 
                 // ---- Non-asset enrichments ----
 
