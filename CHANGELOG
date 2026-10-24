@@ -1,3 +1,7 @@
+Version 4.6.2 (2026-10-24)
+--------------------------
+Trigger build to use latest base image
+
 Version 4.6.1 (2026-10-08)
 --------------------------
 Make the Docker build consistent with other Snowplow apps (#11)
