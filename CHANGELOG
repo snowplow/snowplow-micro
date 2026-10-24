@@ -1,3 +1,7 @@
+Version 4.6.1 (2026-10-08)
+--------------------------
+Make the Docker build consistent with other Snowplow apps (#11)
+
 Version 4.6.0 (2026-09-25)
 --------------------------
 Bump dependencies for 4.6.0 release (#7)

@@ -1,5 +1,5 @@
 addSbtPlugin("io.github.davidgregory084" % "sbt-tpolecat"         % "0.4.2")
-addSbtPlugin("com.snowplowanalytics"     % "sbt-snowplow-release" % "0.4.0")
+addSbtPlugin("com.snowplowanalytics"     % "sbt-snowplow-release" % "0.8.0")
 addSbtPlugin("com.eed3si9n"              % "sbt-buildinfo"        % "0.11.0")
 addSbtPlugin("com.dwijnand"              % "sbt-dynver"           % "4.1.1")
 addSbtPlugin("com.eed3si9n"              % "sbt-assembly"         % "2.0.0")

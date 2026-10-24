@@ -6,7 +6,6 @@
   * Copyright (c) 2019-2022 Snowplow Analytics Ltd. All rights reserved.
   */
 import com.typesafe.sbt.packager.MappingsHelper.directory
-import com.typesafe.sbt.packager.docker.*
 
 import scala.collection.Seq
 
@@ -26,7 +25,6 @@ lazy val buildSettings = Seq(
     baseDirectory.value / "config",
     baseDirectory.value / "ui" / "out"
   ),
-  Compile / unmanagedResources += file("LICENSE.md"),
   Test / parallelExecution := false,
   Test / javaOptions := nashornJvmOptions,
   Test / fork := true
@@ -78,47 +76,36 @@ lazy val commonSettings =
   Settings.dynverOptions ++
   Settings.assemblyOptions
 
+// Shared by both images; the Snowplow docker plugins supply everything else (base image, user, install location, ...)
 lazy val dockerCommon = Seq(
-  Docker / maintainer := "Snowplow Analytics Ltd. <support@snowplow.io>",
-  Docker / packageName := "snowplow/snowplow-micro",
-  Docker / defaultLinuxInstallLocation := "/opt/snowplow",
-  Docker / daemonUserUid := None,
-  dockerPermissionStrategy := DockerPermissionStrategy.CopyChown,
-  dockerRepository := Some("snowplow"),
-  Universal / mappings += file("LICENSE.md") -> "/SNOWPLOW-LICENSE.md"
+  Docker / packageName := "snowplow-micro",
+  Universal / mappings += file("LICENSE.md") -> "/SNOWPLOW-LICENSE.md",
+  Universal / mappings ++= directory((ThisBuild / baseDirectory).value / "ui" / "out").map {
+    case (source, destination) => (source, destination.replaceFirst("^out/", "ui/"))
+  }
 )
 
-lazy val microSettingsDistroless = dockerCommon ++ Seq(
-  dockerBaseImage := "gcr.io/distroless/java21-debian12:nonroot",
-  Docker / daemonUser := "nonroot",
-  Docker / daemonGroup := "nonroot",
-  dockerEntrypoint := "java" :: nashornJvmOptions ::: List(
-    "-cp",
-    s"/opt/snowplow/lib/${(packageJavaClasspathJar / artifactPath).value.getName}:/opt/snowplow/ui:/config",
-    "com.snowplowanalytics.snowplow.micro.Main"
-  ),
-  Universal / mappings ++= directory((micro / baseDirectory).value / "ui" / "out").map {
-    case (source, destination) => (source, destination.replaceFirst("^out/", "ui/"))
-  },
-  sourceDirectory := (micro / sourceDirectory).value
+lazy val dockerSettings = Seq(
+  scriptClasspath ++= Seq(s"${(Docker / defaultLinuxInstallLocation).value}/ui", "/config"),
+  Universal / javaOptions ++= nashornJvmOptions
 )
 
-lazy val microSettings = dockerCommon ++ Seq(
-  dockerBaseImage := "eclipse-temurin:21",
-  Docker / daemonUser := "daemon",
-  scriptClasspath ++= Seq("/opt/snowplow/ui", "/config"),
-  Universal / javaOptions ++= nashornJvmOptions,
-  Universal / mappings ++= directory(baseDirectory.value / "ui" / "out").map {
-    case (source, destination) => (source, destination.replaceFirst("^out/", "ui/"))
+lazy val dockerSettingsDistroless = Seq(
+  // Manifest Class-Path entries are URLs relative to lib/; directories need a trailing slash
+  packageJavaLauncherJar / scriptClasspath ++= Seq("../ui/", "/config/"),
+  dockerEntrypoint := {
+    val orig = dockerEntrypoint.value
+    orig.head +: nashornJvmOptions ++: orig.tail
   }
 )
 
 lazy val micro = project
   .in(file("."))
-  .settings(commonSettings ++ microSettings)
-  .enablePlugins(BuildInfoPlugin, DockerPlugin, JavaAppPackaging)
+  .settings(commonSettings ++ dockerCommon ++ dockerSettings)
+  .enablePlugins(BuildInfoPlugin, SnowplowDockerPlugin, JavaAppPackaging)
   
 lazy val microDistroless = project
   .in(file("distroless/micro"))
-  .settings(commonSettings ++ microSettingsDistroless)
-  .enablePlugins(BuildInfoPlugin, DockerPlugin, JavaAppPackaging, ClasspathJarPlugin)
+  .settings(sourceDirectory := (micro / sourceDirectory).value)
+  .settings(commonSettings ++ dockerCommon ++ dockerSettingsDistroless)
+  .enablePlugins(BuildInfoPlugin, SnowplowDistrolessDockerPlugin, JavaAppPackaging)
