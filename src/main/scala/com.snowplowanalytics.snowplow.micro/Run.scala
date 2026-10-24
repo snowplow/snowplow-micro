@@ -12,7 +12,7 @@ package com.snowplowanalytics.snowplow.micro
 
 import cats.data.EitherT
 import cats.effect.{ExitCode, IO, Resource}
-import cats.effect.std.Queue
+import cats.effect.std.{Queue, QueueSink}
 import cats.implicits._
 import com.monovore.decline.Opts
 import com.snowplowanalytics.iglu.client.resolver.registries.JavaNetRegistryLookup
@@ -61,7 +61,7 @@ object Run {
       managedRegistry <- buildManagedRegistry(config, httpClient)
       badProcessor = Processor(BuildInfo.name, BuildInfo.version)
       lookup = JavaNetRegistryLookup.ioLookupInstance[IO]
-      queue <- Resource.eval(Queue.unbounded[IO, CollectorPayload])
+      queue <- Resource.eval(Queue.unbounded[IO, Option[CollectorPayload]])
       storage <- EventStorage.create(config.storage)
       microRoutes = Routing.create(config, storage, config.auth, lookup)
       sink = new EventSink(config.iglu.client, lookup, managedRegistry, config.outputFormat, config.destination, badProcessor, config.enrichConfig, httpClient, storage)
@@ -71,9 +71,10 @@ object Run {
         .compile
         .drain
         .background
+      payloadSink = (queue: QueueSink[IO, Option[CollectorPayload]]).contramap[CollectorPayload](Some(_))
       collectorService = new Service[IO](
         config.collector,
-        queue,
+        payloadSink,
         BuildInfo
       )
       collectorRoutes = new Routes[IO](

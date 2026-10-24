@@ -15,7 +15,7 @@ import Keys._
 
 // SBT Assembly
 import sbtassembly.AssemblyPlugin.autoImport._
-import sbtassembly.Assembly.Library
+import sbtassembly.Assembly.{JarEntry, Library}
 
 // SBT DynVer
 import sbtdynver.DynVerPlugin.autoImport._
@@ -52,7 +52,8 @@ object Settings {
     "-Ywarn-numeric-widen",
     "-Ywarn-unused",
     "-Ywarn-value-discard",
-    "-Ypartial-unification"
+    "-Ypartial-unification",
+    "-Wconf:cat=other-match-analysis:error"
   )
 
   lazy val javaCompilerOptions = Seq(
@@ -70,15 +71,34 @@ object Settings {
     assembly / assemblyMergeStrategy := {
       case PathList("META-INF", "services", xs @ _*) => MergeStrategy.concat
       case PathList("META-INF", xs @ _*) => MergeStrategy.discard
-      case "reference.conf" => CustomMergeStrategy.rename {
-        case dependency @ Library(module, _, _, _)
-          if module.jarName.startsWith("snowplow-stream-collector") =>
-          s"collector-${dependency.target}"
-        case dependency => dependency.target
-      }
+      case "reference.conf" => referenceConfMergeStrategy
       case x => MergeStrategy.first
     }
   )
+
+  /**
+   * Micro loads the collector's reference.conf explicitly as `collector-reference.conf`, and relies on
+   * enrich's being the one and only `reference.conf`. The common-streams reference.conf only has
+   * defaults for streams sources and sinks, which micro does not use, so it gets discarded.
+   *
+   * Any other reference.conf fails the build, so that we decide how to handle it.
+   */
+  private lazy val referenceConfMergeStrategy = CustomMergeStrategy("ReferenceConf", 1) { dependencies =>
+    val (collector, others) = dependencies.partition {
+      case Library(module, _, _, _) => module.name.startsWith("snowplow-stream-collector")
+      case _                        => false
+    }
+    val kept = others.filterNot {
+      case Library(module, _, _, _) => module.organization == "com.snowplowanalytics" && module.name.startsWith("streams-")
+      case _                        => false
+    }
+    kept match {
+      case Vector(single) =>
+        Right(collector.map(dep => JarEntry(s"collector-${dep.target}", dep.stream)) :+ JarEntry(single.target, single.stream))
+      case _ =>
+        Left(s"Expected exactly one reference.conf after handling collector and common-streams, but found: ${kept.mkString(", ")}")
+    }
+  }
 
   lazy val dynverOptions = Seq(
     ThisBuild / dynverSeparator := "-",    // to be compatible with docker

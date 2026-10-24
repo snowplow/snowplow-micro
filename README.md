@@ -25,7 +25,7 @@ Then clone the repository and publish the Collector dependency locally:
 git clone git@github.com:snowplow-incubator/snowplow-micro.git
 cd snowplow-micro
 
-git clone --branch 3.7.0 --depth 1 git@github.com:snowplow/stream-collector.git
+git clone --branch 3.8.0 --depth 1 git@github.com:snowplow/stream-collector.git
 cd stream-collector
 sbt +publishLocal && cd ..
 ```
