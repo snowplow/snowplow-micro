@@ -24,8 +24,6 @@ import com.snowplowanalytics.snowplow.micro.Configuration.EnvironmentVariables
 
 import java.net.URI
 
-import scala.language.higherKinds
-
 private[blob] object AzureBlobClient {
 
   def client[F[_]: Async]: BlobClientFactory[F] =

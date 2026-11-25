@@ -37,6 +37,6 @@ class ConfigHelperSpec extends Specification with CatsEffect {
   }
 
   private def load(args: List[String]): IO[Either[String, MicroConfig]] = {
-    Command("test-app", "test")(Configuration.load()).parse(args).right.get.value
+    Command("test-app", "test")(Configuration.load()).parse(args).toOption.get.value
   }
 }

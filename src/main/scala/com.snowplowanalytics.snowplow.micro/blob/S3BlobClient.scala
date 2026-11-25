@@ -22,8 +22,6 @@ import cats.effect.{Async, Resource, Sync}
 import java.net.URI
 import java.nio.ByteBuffer
 
-import scala.language.higherKinds
-
 private[blob] object S3BlobClient {
 
   def client[F[_]: Async]: BlobClientFactory[F] =

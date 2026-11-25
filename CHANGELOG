@@ -1,3 +1,13 @@
+Version 4.7.0 (2026-11-24)
+--------------------------
+Bump dependencies to latest and drop stale security overrides (#19)
+Bump Collector to 3.10.0 and Enrich to 6.15.0 (#19)
+Search all columns in hosted Micro, limited to the last 100k events (#18)
+Publish Docker images through the shared docker-publish workflow (#13)
+Persist checkout credentials so Claude mentions can fetch (#17)
+Harden claude.yml workflow against prompt injection
+Build on Scala 2.13 (#14)
+
 Version 4.6.2 (2026-10-24)
 --------------------------
 Trigger build to use latest base image

@@ -12,7 +12,6 @@ package com.snowplowanalytics.snowplow.micro
 
 import scala.concurrent.ExecutionContext
 import scala.concurrent.duration.FiniteDuration
-import scala.language.higherKinds
 
 import cats.implicits._
 

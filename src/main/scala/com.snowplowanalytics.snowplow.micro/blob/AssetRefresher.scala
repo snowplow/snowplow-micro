@@ -16,7 +16,6 @@ import java.nio.ByteBuffer
 import java.nio.file.{FileSystems, Path => NioPath}
 
 import scala.concurrent.duration._
-import scala.language.higherKinds
 import scala.util.control.NonFatal
 
 import cats.{Applicative, Eq, Foldable}

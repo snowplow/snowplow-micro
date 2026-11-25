@@ -364,6 +364,34 @@ trait EventStorageColumnStatsSpec {
         }.unsafeRunSync()
       }
 
+      "should return distinct values for standard, self-describing event and entity fields, with Unicode" >> {
+        storageResource.use { storage =>
+          for {
+            _ <- storage.addToGood(List(
+              richEvent(1, "10.0.0.1", List("Zoë", "東京"), "café ☕"),
+              richEvent(2, "10.0.0.2", List("Zoë"), "naïve")
+            ))
+            response <- storage.getColumnStats(List("user_ipaddress", s"$UserEntityColumn.name", s"$ClickEventColumn.label"))
+          } yield {
+            response("user_ipaddress").filterable must beTrue
+            response("user_ipaddress").values must beSome(contain(exactly("10.0.0.1", "10.0.0.2")))
+            response(s"$UserEntityColumn.name").filterable must beTrue
+            response(s"$UserEntityColumn.name").values must beSome(contain(exactly("Zoë", "東京")))
+            response(s"$ClickEventColumn.label").filterable must beTrue
+            response(s"$ClickEventColumn.label").values must beSome(contain(exactly("café ☕", "naïve")))
+          }
+        }.unsafeRunSync()
+      }
+
+      "should keep timestamp columns and whole complex columns non-filterable" >> {
+        storageResource.use { storage =>
+          storage.getColumnStats(List("derived_tstamp", UserEntityColumn, ClickEventColumn)).map { response =>
+            response.values.map(_.filterable).toList must contain(beFalse).foreach
+            response.values.map(_.values).toList must contain(beNone).foreach
+          }
+        }.unsafeRunSync()
+      }
+
       "should return stats for supported columns" >> {
         storageResource.use { storage =>
           for {
@@ -463,6 +491,77 @@ trait EventStorageFilteredEventsSpec {
             result.events must have size(2)
             result.totalItems must_== 2
           }
+        }.unsafeRunSync()
+      }
+
+      "should filter by a standard column that isn't indexed" >> {
+        storageResource.use { storage =>
+          for {
+            _ <- storage.addToGood(List(
+              richEvent(1, "10.0.0.1", List("a"), "x"),
+              richEvent(2, "10.0.0.2", List("a"), "x"),
+              richEvent(3, "10.0.0.3", List("a"), "x")
+            ))
+            filter = EventsFilter("user_ipaddress", List("10.0.0.1", "10.0.0.3"))
+            result <- storage.getFilteredEvents(EventsRequest(List(filter), None, None, None, 1, 10))
+          } yield {
+            result.totalItems must_== 2
+            result.events.flatMap(_.hcursor.get[String]("user_ipaddress").toOption) must contain(exactly("10.0.0.1", "10.0.0.3"))
+          }
+        }.unsafeRunSync()
+      }
+
+      "should filter by a self-describing event field, with Unicode" >> {
+        storageResource.use { storage =>
+          for {
+            _ <- storage.addToGood(List(
+              richEvent(1, "10.0.0.1", List("a"), "café ☕"),
+              richEvent(2, "10.0.0.2", List("a"), "cafe")
+            ))
+            filter = EventsFilter(s"$ClickEventColumn.label", List("café ☕"))
+            result <- storage.getFilteredEvents(EventsRequest(List(filter), None, None, None, 1, 10))
+          } yield {
+            result.totalItems must_== 1
+            result.events.flatMap(_.hcursor.get[String]("user_ipaddress").toOption) must_== List("10.0.0.1")
+          }
+        }.unsafeRunSync()
+      }
+
+      "should filter by an entity field, matching any entity of that type, with Unicode" >> {
+        storageResource.use { storage =>
+          for {
+            _ <- storage.addToGood(List(
+              richEvent(1, "10.0.0.1", List("Zoë", "東京"), "x"),
+              richEvent(2, "10.0.0.2", List("Zoe"), "x"),
+              richEvent(3, "10.0.0.3", List("東京"), "x"),
+              GoodEvent1
+            ))
+            filter = EventsFilter(s"$UserEntityColumn.name", List("東京"))
+            result <- storage.getFilteredEvents(EventsRequest(List(filter), None, None, None, 1, 10))
+          } yield {
+            result.totalItems must_== 2
+            result.events.flatMap(_.hcursor.get[String]("user_ipaddress").toOption) must contain(exactly("10.0.0.1", "10.0.0.3"))
+          }
+        }.unsafeRunSync()
+      }
+
+      "should combine filters on indexed, standard, self-describing event and entity fields" >> {
+        storageResource.use { storage =>
+          for {
+            _ <- storage.addToGood(List(
+              richEvent(1, "10.0.0.1", List("Zoë"), "café"),
+              richEvent(2, "10.0.0.1", List("Zoë"), "other"),
+              richEvent(3, "10.0.0.1", List("other"), "café"),
+              richEvent(4, "10.0.0.2", List("Zoë"), "café")
+            ))
+            filters = List(
+              EventsFilter("app_id", List("rich")),
+              EventsFilter("user_ipaddress", List("10.0.0.1")),
+              EventsFilter(s"$UserEntityColumn.name", List("Zoë")),
+              EventsFilter(s"$ClickEventColumn.label", List("café"))
+            )
+            result <- storage.getFilteredEvents(EventsRequest(filters, None, None, None, 1, 10))
+          } yield result.totalItems must_== 1
         }.unsafeRunSync()
       }
 

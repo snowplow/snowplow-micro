@@ -20,6 +20,7 @@ import org.typelevel.log4cats.Logger
 import org.typelevel.log4cats.slf4j.Slf4jLogger
 
 import scala.collection.mutable
+import scala.concurrent.duration.FiniteDuration
 
 trait EventStorage {
   def addToGood(events: List[GoodEvent]): IO[Unit]
@@ -47,7 +48,8 @@ object NoStorage extends EventStorage {
 object EventStorage {
   implicit val logger: Logger[IO] = Slf4jLogger.getLogger[IO]
 
-  def create(config: StorageMode): Resource[IO, EventStorage] = {
+  /** @param httpTimeout how long the HTTP server waits for a response, so that storage queries can stop before it */
+  def create(config: StorageMode, httpTimeout: FiniteDuration): Resource[IO, EventStorage] = {
     config match {
       case StorageMode.None =>
         Resource.eval(logger.info("Not storing any events")) *>
@@ -55,7 +57,7 @@ object EventStorage {
       case StorageMode.Persistent(host, port, database, user, password, ttl, cleanupInterval) =>
         Resource.eval(logger.info(s"Storing events in PostgreSQL at $host:$port/$database")) *>
         (for {
-          storage <- PostgresqlStorage.create(host, port, database, user, password)
+          storage <- PostgresqlStorage.create(host, port, database, user, password, httpTimeout)
           _ <- storage.scheduleCleanup(ttl, cleanupInterval)
         } yield storage)
       case StorageMode.InMemory =>
@@ -69,6 +71,31 @@ object EventStorage {
   def isContextsColumn(column: String): Boolean = column.startsWith("contexts_")
   def isUnstructEventColumn(column: String): Boolean = column.startsWith("unstruct_event")
   def isComplexColumn(column: String): Boolean = isContextsColumn(column) || isUnstructEventColumn(column)
+
+  /** A column that can be filtered on, after parsing its name. */
+  sealed trait FilterableColumn
+  object FilterableColumn {
+    /** A top-level column of the event, e.g. `app_id`. */
+    final case class Standard(column: String) extends FilterableColumn
+    /** A field of the self-describing event, e.g. `unstruct_event_x.field`. */
+    final case class UnstructEventField(column: String, field: String) extends FilterableColumn
+    /** A field of an entity, e.g. `contexts_x.field`. Matches if any entity of that type has the value. */
+    final case class ContextsField(column: String, field: String) extends FilterableColumn
+  }
+
+  /** Parse a column name into a filterable column.
+    * Timestamp columns and whole `contexts_` / `unstruct_event_` columns (the full JSON) are not filterable.
+    */
+  def filterableColumn(column: String): Option[FilterableColumn] =
+    if (column.isEmpty || isTimestampColumn(column)) None
+    else if (isComplexColumn(column)) {
+      column.split("\\.", 2) match {
+        case Array(parent, field) if parent.nonEmpty && field.nonEmpty =>
+          if (isContextsColumn(parent)) Some(FilterableColumn.ContextsField(parent, field))
+          else Some(FilterableColumn.UnstructEventField(parent, field))
+        case _ => None
+      }
+    } else Some(FilterableColumn.Standard(column))
 
   def extractColumnsFromEvent(eventJson: Json): Set[String] = {
     val columnNames = mutable.Set[String]()

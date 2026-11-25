@@ -32,8 +32,12 @@ import scala.concurrent.duration._
 /** PostgreSQL-based event storage.
  * Only stores the Analytics SDK JSON representation of valid and failed (incomplete) events.
   */
-private[micro] class PostgresqlStorage(xa: Transactor[IO]) extends EventStorage {
+private[micro] class PostgresqlStorage(
+  private[micro] val xa: Transactor[IO],
+  unindexedSearchLimit: Int = PostgresqlStorage.UNINDEXED_SEARCH_LIMIT
+) extends EventStorage {
   import PostgresqlStorage._
+  import EventStorage.FilterableColumn
 
   /** Add events to PostgreSQL storage. */
   override def addToGood(events: List[GoodEvent]): IO[Unit] = {
@@ -139,33 +143,42 @@ private[micro] class PostgresqlStorage(xa: Transactor[IO]) extends EventStorage 
 
     columns.parTraverse { column =>
       val sortable = column === "collector_tstamp" || INDEXED_COLUMNS.contains(column)
-      val filterable = INDEXED_COLUMNS.contains(column)
+      val filterableColumn = EventStorage.filterableColumn(column)
 
-      val distinctValues = if (filterable) {
-        val frCol = Fragment.const(column)
-        val query = fr"""
-          | SELECT DISTINCT value FROM (
-          |   SELECT $frCol AS value FROM events
-          |   ORDER BY timestamp DESC LIMIT $COLUMN_STATS_SCAN_LIMIT
-          | ) subquery WHERE value IS NOT NULL LIMIT 20
-          |""".stripMargin
-
-        query.query[String]
-          .to[List]
-          .transact(xa)
-          .map(values => Some(values))
-      } else {
-        IO.pure(None)
-      }
-
-      distinctValues.map { values =>
+      filterableColumn.traverse(distinctValues).map { values =>
         column -> ColumnStats(
           sortable = sortable,
-          filterable = filterable,
-          values = values
+          filterable = filterableColumn.isDefined,
+          values = values,
+          searchLimit = filterableColumn.filterNot(isIndexed).as(unindexedSearchLimit)
         )
       }
     }.map(_.toMap)
+  }
+
+  /** Up to 20 distinct values of a filterable column, among the most recent events. */
+  private def distinctValues(column: FilterableColumn): IO[List[String]] = {
+    val query = column match {
+      case FilterableColumn.ContextsField(parent, _) =>
+        fr"""
+          | SELECT DISTINCT value FROM (
+          |   SELECT""".stripMargin ++ valueExpression(column) ++ fr"""AS value FROM (
+          |     SELECT event_json FROM events
+          |     ORDER BY timestamp DESC LIMIT $COLUMN_STATS_SCAN_LIMIT
+          |   ) recent
+          |   CROSS JOIN LATERAL jsonb_array_elements(""".stripMargin ++ entitiesArray(parent) ++ fr""") AS e
+          | ) subquery WHERE value IS NOT NULL LIMIT 20
+          |""".stripMargin
+      case other =>
+        fr"""
+          | SELECT DISTINCT value FROM (
+          |   SELECT""".stripMargin ++ valueExpression(other) ++ fr"""AS value FROM events
+          |   ORDER BY timestamp DESC LIMIT $COLUMN_STATS_SCAN_LIMIT
+          | ) subquery WHERE value IS NOT NULL LIMIT 20
+          |""".stripMargin
+    }
+
+    query.query[String].to[List].transact(xa)
   }
 
   override def getFilteredEvents(request: EventsRequest): IO[EventsResponse] = {
@@ -186,18 +199,31 @@ private[micro] class PostgresqlStorage(xa: Transactor[IO]) extends EventStorage 
       }
     ).flatten
 
-    // Only filter on indexed columns (PostgreSQL mode doesn't support JSON column filtering yet)
-    val columnFilters = request.filters
-      .filter(f => INDEXED_COLUMNS.contains(f.column))
-      .flatMap { filter =>
-        val frCol = Fragment.const(filter.column)
-        NonEmptyList.fromList(filter.values.filter(_.nonEmpty)).map { nel =>
-          fr"AND" ++ Fragments.in(frCol, nel)
-        }
-      }
+    val activeFilters = request.filters.flatMap { filter =>
+      (EventStorage.filterableColumn(filter.column), NonEmptyList.fromList(filter.values.filter(_.nonEmpty))).tupled
+    }
 
-    val allConditions = whereConditions ++ columnFilters
-    val whereClause = allConditions.foldLeft(baseConditions)(_ ++ _)
+    val columnFilters = activeFilters.map { case (column, values) =>
+      fr"AND" ++ filterCondition(column, values)
+    }
+
+    // Filters on unindexed columns read the event's JSON, which is too slow over a whole table.
+    // They only search the most recent events, within the time range and valid/failed conditions.
+    val searchesRecentOnly = activeFilters.exists { case (column, _) => !isIndexed(column) }
+
+    val whereClause = if (searchesRecentOnly) {
+      // Events are stored in arrival order, so reading the most recent ones newest-first (ORDER BY timestamp DESC LIMIT n)
+      // reads the table backwards, which defeats the OS read-ahead and is ~10x slower.
+      // Instead, the cutoff timestamp is read from the index, and the events after it are read in storage order.
+      // Events sharing the cutoff timestamp are all searched, so slightly more than the limit can be.
+      val conditions = whereConditions.foldLeft(baseConditions)(_ ++ _)
+      val cutoff = fr"(SELECT timestamp FROM events" ++ conditions ++
+        fr"ORDER BY timestamp DESC OFFSET ${unindexedSearchLimit - 1} LIMIT 1)"
+      (whereConditions ++ (fr"AND timestamp >= COALESCE(" ++ cutoff ++ fr", '-infinity'::timestamp)" :: columnFilters))
+        .foldLeft(baseConditions)(_ ++ _)
+    } else {
+      (whereConditions ++ columnFilters).foldLeft(baseConditions)(_ ++ _)
+    }
 
     // Only allow sorting on indexed columns
     val orderByClause = request.sorting.filter { s =>
@@ -218,11 +244,28 @@ private[micro] class PostgresqlStorage(xa: Transactor[IO]) extends EventStorage 
     val offset = (request.page - 1) * safePageSize
 
     val countQuery = fr"SELECT COUNT(*) FROM events $whereClause"
-    val dataQuery = fr"""
-      | SELECT event_json FROM events
-      | $whereClause $orderByClause
-      | LIMIT $safePageSize OFFSET $offset
-      |""".stripMargin
+    val dataQuery = if (searchesRecentOnly) {
+      // With ORDER BY + LIMIT, Postgres would read the events newest-first again.
+      // MATERIALIZED makes it find all the matches in storage order first, then sort only those.
+      // The JSON of the matches isn't kept, only what's needed to sort them and fetch the page.
+      val sortColumns = Fragment.const0((INDEXED_COLUMNS + "timestamp").toList.sorted.mkString(", "))
+      fr"""
+        | WITH matches AS MATERIALIZED (SELECT $sortColumns FROM events $whereClause)
+        | SELECT events.event_json FROM (
+        |   SELECT event_id, position FROM (
+        |     SELECT event_id, row_number() OVER ($orderByClause) AS position FROM matches
+        |   ) numbered
+        |   WHERE position > $offset ORDER BY position LIMIT $safePageSize
+        | ) page JOIN events USING (event_id)
+        | ORDER BY page.position
+        |""".stripMargin
+    } else {
+      fr"""
+        | SELECT event_json FROM events
+        | $whereClause $orderByClause
+        | LIMIT $safePageSize OFFSET $offset
+        |""".stripMargin
+    }
 
     (
       countQuery.query[Int].unique.transact(xa),
@@ -259,16 +302,75 @@ private[micro] object PostgresqlStorage {
   // Tunable: increase for more coverage, decrease for better performance
   private val COLUMN_STATS_SCAN_LIMIT = 1000
 
+  // Filters on unindexed columns (read from event_json) only search the most recent N events,
+  // so that they answer in about a second whatever the size of the table
+  private[micro] val UNINDEXED_SEARCH_LIMIT = 100000
+
+  /** A statement timeout a bit below the HTTP server's timeout (`networking.responseHeaderTimeout`, 30 s by default),
+    * so a query doesn't keep running after its request failed.
+    */
+  private[micro] def statementTimeout(httpTimeout: FiniteDuration): FiniteDuration =
+    (httpTimeout * 9 / 10).toMillis.max(1L).millis
+
+  private def isIndexed(column: EventStorage.FilterableColumn): Boolean =
+    column match {
+      case EventStorage.FilterableColumn.Standard(name) => INDEXED_COLUMNS.contains(name)
+      case _ => false
+    }
+
+  /** SQL expression for the value of a column. Names that aren't indexed columns are bound as parameters. */
+  private def valueExpression(column: EventStorage.FilterableColumn): Fragment =
+    column match {
+      case EventStorage.FilterableColumn.Standard(name) if INDEXED_COLUMNS.contains(name) =>
+        Fragment.const(name)
+      case EventStorage.FilterableColumn.Standard(name) =>
+        fr"(event_json ->> $name::text)"
+      case EventStorage.FilterableColumn.UnstructEventField(parent, field) =>
+        fr"(event_json -> $parent::text ->> $field::text)"
+      case EventStorage.FilterableColumn.ContextsField(_, field) =>
+        // The field of the entity `e` in scope, one of the elements of entitiesArray
+        fr"(e ->> $field::text)"
+    }
+
+  /** The entities of a type as a JSON array, empty if the event has none. */
+  private def entitiesArray(parent: String): Fragment =
+    fr0"(CASE WHEN jsonb_typeof(event_json -> $parent::text) = 'array' THEN event_json -> $parent::text ELSE '[]'::jsonb END)"
+
+  /** Condition matching events whose column has one of the values (exact match). */
+  private def filterCondition(column: EventStorage.FilterableColumn, values: NonEmptyList[String]): Fragment =
+    column match {
+      case EventStorage.FilterableColumn.ContextsField(parent, _) =>
+        // Matches if any entity of that type has one of the values
+        fr"EXISTS (SELECT 1 FROM jsonb_array_elements(" ++ entitiesArray(parent) ++ fr") AS e WHERE" ++
+          Fragments.in(valueExpression(column), values) ++ fr")"
+      case other =>
+        Fragments.in(valueExpression(other), values)
+    }
+
   /** Create PostgreSQL storage with database connection. */
-  def create(host: String, port: Int, database: String, user: String, password: String): Resource[IO, PostgresqlStorage] = {
+  def create(
+    host: String,
+    port: Int,
+    database: String,
+    user: String,
+    password: String,
+    httpTimeout: FiniteDuration,
+    unindexedSearchLimit: Int = UNINDEXED_SEARCH_LIMIT
+  ): Resource[IO, PostgresqlStorage] = {
     val url = s"jdbc:postgresql://$host:$port/$database"
     for {
-      xa <- transactor(url, user, password, maxPoolSize = 8)
+      xa <- transactor(url, user, password, maxPoolSize = 8, statementTimeout(httpTimeout))
       _ <- Resource.eval(initialize(xa))
-    } yield new PostgresqlStorage(xa)
+    } yield new PostgresqlStorage(xa, unindexedSearchLimit)
   }
 
-  private def transactor(url: String, user: String, password: String, maxPoolSize: Int): Resource[IO, HikariTransactor[IO]] =
+  private def transactor(
+    url: String,
+    user: String,
+    password: String,
+    maxPoolSize: Int,
+    statementTimeout: FiniteDuration
+  ): Resource[IO, HikariTransactor[IO]] =
     for {
       ec <- ExecutionContexts.fixedThreadPool[IO](maxPoolSize)
       xa <- HikariTransactor.newHikariTransactor[IO](
@@ -278,15 +380,17 @@ private[micro] object PostgresqlStorage {
         pass = password,
         connectEC = ec
       )
-      _ <- Resource.eval(configureDataSource(xa, maxPoolSize = maxPoolSize))
+      _ <- Resource.eval(configureDataSource(xa, maxPoolSize = maxPoolSize, statementTimeout))
     } yield xa
 
-  private def configureDataSource(xa: HikariTransactor[IO], maxPoolSize: Int): IO[Unit] = IO {
+  private def configureDataSource(xa: HikariTransactor[IO], maxPoolSize: Int, statementTimeout: FiniteDuration): IO[Unit] = IO {
     val config = xa.kernel.getHikariConfigMXBean
     config.setMaximumPoolSize(maxPoolSize)
     config.setMinimumIdle(2)
     config.setConnectionTimeout(30000)  // 30 second connection timeout
     config.setIdleTimeout(600000)       // 10 minute idle timeout
+    // connectionInitSql is not on the MXBean: set it on the data source, before the pool opens its first connection
+    xa.kernel.setConnectionInitSql(s"SET statement_timeout = ${statementTimeout.toMillis}")
   }
 
   private def initialize(xa: Transactor[IO]): IO[Unit] =
@@ -300,7 +404,7 @@ private[micro] object PostgresqlStorage {
       CREATE TABLE IF NOT EXISTS events (
         event_id TEXT PRIMARY KEY,
         timestamp TIMESTAMP NOT NULL,
-        event_json JSONB NOT NULL,
+        event_json JSONB COMPRESSION lz4 NOT NULL,
         failed BOOLEAN NOT NULL,
         app_id TEXT,
         event_name TEXT,

@@ -118,15 +118,13 @@ private[micro] class InMemoryStorage extends EventStorage {
   override def getColumnStats(columns: List[String]): IO[ColumnStatsResponse] = {
     getEvents.map { jsonEvents =>
       columns.map { column =>
-        // TODO: support complex columns at some point
+        // Sorting on fields of complex columns isn't supported
         val sortable = !EventStorage.isComplexColumn(column)
 
-        // TODO: support complex columns at some point
-        val filterable = !EventStorage.isComplexColumn(column) &&
-          !EventStorage.isTimestampColumn(column)
+        val filterable = EventStorage.filterableColumn(column).isDefined
 
         val distinctValues = if (filterable) {
-          val values = jsonEvents.flatMap(InMemoryStorage.getColumnValue(_, column)).distinct.take(20)
+          val values = jsonEvents.iterator.flatMap(InMemoryStorage.getColumnValues(_, column)).distinct.take(20).toList
           Some(values)
         } else {
           None
@@ -157,7 +155,7 @@ private[micro] class InMemoryStorage extends EventStorage {
       val filteredEvents = preFilteredEvents
         .map(_.event.toJson(lossy = true))
         .filter { eventJson =>
-          request.filters.filterNot(f => EventStorage.isComplexColumn(f.column)).forall { filter =>
+          request.filters.filter(f => EventStorage.filterableColumn(f.column).isDefined).forall { filter =>
             applyFilter(eventJson, filter)
           }
         }
@@ -202,25 +200,48 @@ private[micro] object InMemoryStorage {
 
   /* --- Filters and sorting for the newer /micro/events endpoint */
 
+  /** Value of a column that holds a single value: a standard column or a field of the self-describing event.
+    * Entity fields (`contexts_x.field`) can hold several values, see [[getColumnValues]].
+    */
   private[micro] def getColumnValue(eventJson: Json, column: String): Option[String] = {
     if (EventStorage.isComplexColumn(column)) {
-      // TODO: support complex columns
-      None
+      EventStorage.filterableColumn(column).collect {
+        case EventStorage.FilterableColumn.UnstructEventField(parent, field) =>
+          eventJson.hcursor.downField(parent).downField(field).focus.flatMap(nestedValueAsString)
+      }.flatten
     } else {
       // Handle simple columns
       eventJson.asObject
         .flatMap(_.apply(column))
-        .map(value => value.asString.getOrElse(value.noSpaces))
+        .map(valueAsString)
     }
   }
+
+  /** All the values of a column in an event. For an entity field (`contexts_x.field`),
+    * the values of that field in every entity of that type.
+    */
+  private[micro] def getColumnValues(eventJson: Json, column: String): List[String] =
+    EventStorage.filterableColumn(column) match {
+      case Some(EventStorage.FilterableColumn.ContextsField(parent, field)) =>
+        eventJson.hcursor.downField(parent).focus.flatMap(_.asArray).toList.flatten.flatMap { entity =>
+          entity.hcursor.downField(field).focus.flatMap(nestedValueAsString)
+        }
+      case _ =>
+        getColumnValue(eventJson, column).toList
+    }
+
+  private def valueAsString(value: Json): String =
+    value.asString.getOrElse(value.noSpaces)
+
+  private def nestedValueAsString(value: Json): Option[String] =
+    if (value.isNull) None else Some(valueAsString(value))
 
   private[micro] def applyFilter(eventJson: Json, filter: EventsFilter): Boolean = {
     val filterValues = filter.values.filter(_.nonEmpty)
     if (filterValues.isEmpty) return true
 
-    getColumnValue(eventJson, filter.column) match {
-      case Some(value) => filterValues.exists(fv => value.equalsIgnoreCase(fv))
-      case None => false
+    getColumnValues(eventJson, filter.column).exists { value =>
+      filterValues.exists(fv => value.equalsIgnoreCase(fv))
     }
   }
 

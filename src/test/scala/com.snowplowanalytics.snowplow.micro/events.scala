@@ -88,7 +88,7 @@ object events {
 
     RawEvent(
       collectorApi,
-      params.mapValues(Some(_)),
+      params.view.mapValues(Some(_)).toMap,
       contentType = None,
       Source("Micro", "UTF-8", Some("localhost")),
       Context(

@@ -26,7 +26,6 @@ import com.snowplowanalytics.snowplow.enrich.common.enrichments.{AtomicFields, E
 import com.snowplowanalytics.snowplow.enrich.common.enrichments.registry.EnrichmentConf
 import com.typesafe.config.{ConfigFactory, ConfigParseOptions, Config => TypesafeConfig}
 import fs2.io.file.{Files, Path => FS2Path}
-import io.circe.config.syntax.CirceConfigOps
 import io.circe.generic.semiauto.deriveDecoder
 import io.circe.config.syntax._
 import io.circe.syntax.EncoderOps

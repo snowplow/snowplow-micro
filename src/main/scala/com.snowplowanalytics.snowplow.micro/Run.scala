@@ -62,7 +62,7 @@ object Run {
       badProcessor = Processor(BuildInfo.name, BuildInfo.version)
       lookup = JavaNetRegistryLookup.ioLookupInstance[IO]
       queue <- Resource.eval(Queue.unbounded[IO, Option[CollectorPayload]])
-      storage <- EventStorage.create(config.storage)
+      storage <- EventStorage.create(config.storage, config.collector.networking.responseHeaderTimeout)
       microRoutes = Routing.create(config, storage, config.auth, lookup)
       sink = new EventSink(config.iglu.client, lookup, managedRegistry, config.outputFormat, config.destination, badProcessor, config.enrichConfig, httpClient, storage)
       sinks = Sinks(sink, sink)

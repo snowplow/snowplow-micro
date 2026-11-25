@@ -56,7 +56,7 @@ final class EventSink(igluClient: IgluCirceClient[IO],
   override val maxBytes = Int.MaxValue
   private lazy val logger = LoggerFactory.getLogger("EventLog")
 
-  private val adapterRegistry = new AdapterRegistry[IO](Map.empty, enrichConfig.adaptersSchemas)
+  private val adapterRegistry = new AdapterRegistry[IO](enrichConfig.adaptersSchemas)
 
   override def isHealthy: IO[Boolean] = IO.pure(true)
 

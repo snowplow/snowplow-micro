@@ -62,7 +62,9 @@ final case class TimelineData(points: List[TimelinePoint])
 final case class ColumnStats(
   sortable: Boolean,
   filterable: Boolean,
-  values: Option[List[String]] = None
+  values: Option[List[String]] = None,
+  // Set when filtering on this column only searches the most recent N events
+  searchLimit: Option[Int] = None
 )
 final case class ColumnStatsRequest(columns: List[String])
 

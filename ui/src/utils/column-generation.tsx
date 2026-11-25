@@ -14,6 +14,7 @@ export type EventColumnMeta = {
   eventStatusFilter?: boolean
   eventTimeFilter?: boolean
   distinctValues?: string[]
+  searchLimit?: number | null
 }
 
 function SortableHeader({
@@ -154,12 +155,14 @@ export function generateColumns(
     const isSortable = stats?.sortable ?? false
     const isFilterable = stats?.filterable ?? false
     const distinctValues = stats?.values ?? []
+    const searchLimit = stats?.searchLimit
 
     const columnDef: EventColumnDef = {
       id: fieldName,
       accessorFn: columnMetadata.accessor,
       meta: {
         distinctValues,
+        searchLimit,
       },
       header: ({ column }) => {
         return (

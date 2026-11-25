@@ -35,6 +35,7 @@ import { type ColumnMetadata } from '@/utils/column-metadata'
 import { MultiSelectFilter } from '@/components/MultiSelectFilter'
 import { StatusDropdown } from '@/components/StatusDropdown'
 import { TimeRangeFilter } from '@/components/TimeRangeFilter'
+import { filterPlaceholder } from '@/utils/filter-placeholder'
 
 type DataTableProps = {
   events: Event[]
@@ -183,7 +184,10 @@ export function DataTable({
                                   values.length === 0 ? undefined : values
                                 )
                               }}
-                              placeholder="Filter..."
+                              placeholder={filterPlaceholder(
+                                (header.column.columnDef.meta as EventColumnMeta)
+                                  ?.searchLimit
+                              )}
                             />
                           ) : null}
                         </TableHead>

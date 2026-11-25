@@ -44,15 +44,11 @@ object Settings {
     "-encoding", "UTF-8",
     "-feature",
     "-unchecked",
-    "-Ywarn-dead-code",
-    "-Ywarn-inaccessible",
-    "-Ywarn-infer-any",
-    "-Ywarn-nullary-override",
-    "-Ywarn-nullary-unit",
-    "-Ywarn-numeric-widen",
-    "-Ywarn-unused",
-    "-Ywarn-value-discard",
-    "-Ypartial-unification",
+    "-Wdead-code",
+    "-Xlint:infer-any,inaccessible,nullary-unit",
+    "-Wnumeric-widen",
+    "-Wunused",
+    "-Wvalue-discard",
     "-Wconf:cat=other-match-analysis:error"
   )
 

@@ -12,42 +12,40 @@ object Dependencies {
 
   object V {
     // Snowplow libraries
-    val snowplowStreamCollector = "3.8.0"
-    val snowplowCommonEnrich    = "6.13.1"
+    val snowplowStreamCollector = "3.10.0"
+    val snowplowCommonEnrich    = "6.15.0"
     val snowplowAnalyticsSdk    = "3.2.3"
 
     // Scala and FP core
-    val http4s    = "0.23.37"
-    val decline   = "2.4.1"
+    val http4s    = "0.23.39"
+    val decline   = "2.6.2"
     val catsRetry = "3.1.3"
 
     // Database
     val doobie     = "1.0.0-RC12"
-    val postgresql = "42.7.13"
+    val postgresql = "42.7.15"
 
     // Cloud SDKs
-    val awsSdk           = "2.55.5"
-    val gcpSdk           = "2.74.0"
-    val azureStorageBlob = "12.35.1"
-    val azureIdentity    = "1.18.6"
+    val awsSdk           = "2.59.7"
+    val gcpSdk           = "2.79.0"
+    val azureStorageBlob = "12.37.2"
+    val azureIdentity    = "1.19.0"
 
     // Logging
     val slf4j = "2.0.20"
 
     // Versions held above what something upstream asks for, to keep a vulnerable copy out of the
     // image. See securityOverrides below for which artifacts each one governs.
-    val netty       = "4.2.18.Final"
-    val jackson     = "2.21.7"
-    val mariadb     = "3.4.3"
-    val reactor     = "1.3.7"
+    val netty   = "4.2.21.Final"
+    val mariadb = "3.4.5"
 
     // Held above upstream for binary compatibility rather than security: the netty override above
     // calls into a newer tcnative than the one its upstream brings in
-    val tcnative = "2.0.84.Final"
+    val tcnative = "2.0.86.Final"
 
     // Test only
-    val specs2   = "4.12.2"
-    val specs2CE = "1.5.0"
+    val specs2   = "4.23.0"
+    val specs2CE = "1.8.0"
   }
 
   // Snowplow libraries
@@ -81,9 +79,7 @@ object Dependencies {
   // Artifacts named only to force a version up; grouped into securityOverrides below
   val nettyAll        = "io.netty"                   % "netty-all"                       % V.netty
   val nettyTcnative   = "io.netty"                   % "netty-tcnative-boringssl-static" % V.tcnative
-  val jacksonDatabind = "com.fasterxml.jackson.core" % "jackson-databind"                % V.jackson
   val mariadbClient   = "org.mariadb.jdbc"           % "mariadb-java-client"             % V.mariadb
-  val reactorNetty    = "io.projectreactor.netty"    % "reactor-netty-http"              % V.reactor
 
   // Test only
   val specs2   = "org.specs2"    %% "specs2-core"                % V.specs2   % Test
@@ -94,16 +90,12 @@ object Dependencies {
   // classpath before and after — reading the dependency tree for eviction markers is unreliable,
   // because sbt truncates long lines.
   //
-  // common-enrich brings in netty-all and mariadb-java-client. jackson-databind arrives via
-  // common-enrich and the cloud SDKs; naming it pulls jackson-core up alongside. tcnative is not
-  // itself vulnerable, but has to move in step with netty, so it goes whenever the netty override goes.
-  // The Azure SDK brings in reactor-netty-http, and naming it pulls reactor-core up alongside.
+  // common-enrich brings in netty-all and mariadb-java-client. tcnative is not itself vulnerable,
+  // but has to move in step with netty, so it goes whenever the netty override goes.
   val securityOverrides = Seq(
     nettyAll,
     nettyTcnative,
-    jacksonDatabind,
-    mariadbClient,
-    reactorNetty
+    mariadbClient
   )
 
 }

@@ -18,6 +18,9 @@ import org.joda.time.DateTime
 import com.snowplowanalytics.snowplow.micro.storage.InMemoryStorage
 import com.snowplowanalytics.snowplow.enrich.common.loaders.CollectorPayload
 import com.snowplowanalytics.snowplow.analytics.scalasdk.Event
+import com.snowplowanalytics.snowplow.analytics.scalasdk.SnowplowEvent.{Contexts, UnstructEvent}
+import com.snowplowanalytics.iglu.core.{SchemaKey, SchemaVer, SelfDescribingData}
+import io.circe.Json
 
 import java.util.UUID
 import java.time.Instant
@@ -319,14 +322,47 @@ class InMemoryStorageSpec extends Specification with EventStorageTimelineSpec wi
   }
 
   "InMemoryStorage specific column stats behavior" >> {
-    "should mark complex columns as non-sortable, non-filterable" >> {
+    "should mark fields of complex columns as non-sortable but filterable, and whole complex columns as neither" >> {
       Resource.eval(IO(emptyCache())).use { storage =>
-        storage.getColumnStats(List("contexts_com_example_schema_1.field1")).map { response =>
-          response must haveKey("contexts_com_example_schema_1.field1")
+        val columns = List(
+          "contexts_com_example_schema_1.field1",
+          "unstruct_event_com_example_schema_1.field1",
+          "contexts_com_example_schema_1",
+          "unstruct_event_com_example_schema_1"
+        )
+        storage.getColumnStats(columns).map { response =>
           response("contexts_com_example_schema_1.field1").sortable must beFalse
-          response("contexts_com_example_schema_1.field1").filterable must beFalse
-          response("contexts_com_example_schema_1.field1").values must beNone
+          response("contexts_com_example_schema_1.field1").filterable must beTrue
+          response("contexts_com_example_schema_1.field1").values mustEqual Some(Nil)
+          response("unstruct_event_com_example_schema_1.field1").sortable must beFalse
+          response("unstruct_event_com_example_schema_1.field1").filterable must beTrue
+          response("unstruct_event_com_example_schema_1.field1").values mustEqual Some(Nil)
+          response("contexts_com_example_schema_1").sortable must beFalse
+          response("contexts_com_example_schema_1").filterable must beFalse
+          response("contexts_com_example_schema_1").values must beNone
+          response("unstruct_event_com_example_schema_1").sortable must beFalse
+          response("unstruct_event_com_example_schema_1").filterable must beFalse
+          response("unstruct_event_com_example_schema_1").values must beNone
         }
+      }.unsafeRunSync()
+    }
+
+    "should never set searchLimit" >> {
+      Resource.eval(IO(emptyCache())).use { storage =>
+        for {
+          _ <- storage.addToGood(List(richEvent(1, "10.0.0.1", List("Zoë"), "café")))
+          response <- storage.getColumnStats(List("app_id", "user_ipaddress", s"$UserEntityColumn.name", s"$ClickEventColumn.label"))
+        } yield response.values.map(_.searchLimit).toList must contain(beNone).foreach
+      }.unsafeRunSync()
+    }
+
+    "should filter on any entity of a type, whatever the number of events" >> {
+      val events = (1 to 30).map(i => richEvent(i, "10.0.0.1", List(s"user$i"), "click")).toList
+      Resource.eval(IO(emptyCache())).use { storage =>
+        for {
+          _ <- storage.addToGood(events)
+          result <- storage.getFilteredEvents(EventsRequest(List(EventsFilter(s"$UserEntityColumn.name", List("user1"))), None, None, None, 1, 10))
+        } yield result.totalItems must_== 1
       }.unsafeRunSync()
     }
 
@@ -418,6 +454,31 @@ object InMemoryStorageSpec {
       List("com.snowplowanalytics.context3a"),
       Event.minimal(UUID.randomUUID, Instant.ofEpochSecond(1761686520), "collector1", "etl1")
         .copy(app_id = Some("test3")) // 02:00
+    )
+
+  // Columns of the entity and self-describing event built by richEvent
+  val UserEntityColumn = "contexts_com_acme_user_1"
+  val ClickEventColumn = "unstruct_event_com_acme_click_1"
+
+  private val userSchema = SchemaKey("com.acme", "user", "jsonschema", SchemaVer.Full(1, 0, 0))
+  private val clickSchema = SchemaKey("com.acme", "click", "jsonschema", SchemaVer.Full(1, 0, 0))
+
+  /** An event with a standard column (user_ipaddress), entities of one type (one per name)
+    * and a self-describing event (with a label), collected `second` seconds after GoodEvent1.
+    */
+  def richEvent(second: Int, ip: String, userNames: List[String], clickLabel: String): GoodEvent =
+    GoodEvent(
+      events.buildRawEvent(),
+      Some("unstruct"),
+      Some("com.acme.click"),
+      List("com.acme.user"),
+      Event.minimal(UUID.randomUUID, Instant.ofEpochSecond(1761686400L + second), "collector1", "etl1")
+        .copy(
+          app_id = Some("rich"),
+          user_ipaddress = Some(ip),
+          contexts = Contexts(userNames.map(name => SelfDescribingData(userSchema, Json.obj("name" -> Json.fromString(name))))),
+          unstruct_event = UnstructEvent(Some(SelfDescribingData(clickSchema, Json.obj("label" -> Json.fromString(clickLabel)))))
+        )
     )
 
   val CollectorPayload1: CollectorPayload =

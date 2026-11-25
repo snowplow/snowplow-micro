@@ -17,8 +17,6 @@ import org.http4s.client.{Client => Http4sClient}
 import java.net.URI
 import java.nio.ByteBuffer
 
-import scala.language.higherKinds
-
 /**
  * Factory for creating blob storage clients.
  * Implementations exist for S3, GCS, Azure Blob Storage, and HTTP(S).

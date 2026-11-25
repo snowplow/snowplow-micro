@@ -21,8 +21,6 @@ import scodec.bits.ByteVector
 
 import java.net.URI
 
-import scala.language.higherKinds
-
 private[blob] object HttpBlobClient {
 
   def wrapHttp4sClient[F[_]: Async](httpClient: Http4sClient[F]): BlobClientFactory[F] =

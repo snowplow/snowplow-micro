@@ -26,6 +26,8 @@ export type ColumnStats = {
   sortable: boolean
   filterable: boolean
   values?: string[]
+  // Set when filtering this column only searches the most recent N events
+  searchLimit?: number | null
 }
 
 export type ColumnStatsRequest = {
